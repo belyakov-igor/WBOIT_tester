@@ -96,6 +96,8 @@ void GLWidget::resizeGL(int width, int height)
     m_projectionMatrix.ortho( -halfWidth , halfWidth ,
                               -halfHeight, halfHeight,
                                nearPlane , farPlane    );
+
+    AllocateTTextures();
 }
 
 
@@ -264,12 +266,9 @@ struct ApplyTTexturesGLResources {
                     "#version 430                                       \n"
                     "out vec4 outColor;                                 \n"
                     "                                                   \n"
-                    "layout (location = 0) uniform  sampler2DMS         \n"
-                    "                     colorTexture;                 \n"
-                    "layout (location = 1) uniform  sampler2DMS         \n"
-                    "                    tcolorTexture;                 \n"
-                    "layout (location = 2) uniform  sampler2DMS         \n"
-                    "                     alphaTexture;                 \n"
+                    "layout (location = 0) uniform  sampler2DMS colorTexture; \n"
+                    "layout (location = 1) uniform  sampler2DMS tcolorTexture;\n"
+                    "layout (location = 2) uniform  sampler2DMS  alphaTexture;\n"
                     "                                                   \n"
                     "void main() {                                      \n"
                     "    ivec2 upos = ivec2(gl_FragCoord.xy);           \n"
@@ -289,6 +288,8 @@ struct ApplyTTexturesGLResources {
                     "    color = sumOfTColors / sumOfWeights * alpha    \n"
                     "                + color * (1 - alpha);             \n"
                     "    outColor = vec4(color, 1.0);                   \n"
+
+                    "    outColor = vec4(color, 1.0); return;           \n"
                     "}                                                  \n"
                                             )
            ) assert(false);
