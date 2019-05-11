@@ -15,6 +15,8 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    void InitWalls() const;
+
 private:
     Ui::MainWindow *ui;
 };

@@ -8,11 +8,12 @@
 
 struct GlassWall::Impl
 {
-    explicit Impl(int depthLevel) : m_depthLevel(depthLevel) { UpdateDepths(); }
+    explicit Impl(int depthLevel) : m_depthLevel(depthLevel) { UpdateDepthsOnConctruction(); }
     int m_depthLevel;
     QMatrix3x3 m_transformation;
 
     static void UpdateDepths();
+    void UpdateDepthsOnConctruction();
     GLfloat MyDepth();
 
     std::vector<QVector2D> m_vertices;
@@ -46,8 +47,16 @@ static std::unordered_map<std::string, std::unique_ptr<GlassWall>> g_gwalls;
 static std::unordered_map<std::string, std::unique_ptr<GlassWall>>::iterator g_gwallsIter;
 static float g_gwalls_k, g_gwalls_b; // depth = k * depthLevel + b;
 
+static void CalcCoefsFromMinAndMax(int min, int max)
+{
+    if (min == max) { g_gwalls_k = 0; g_gwalls_b = 0.5; return; }
+    g_gwalls_k = 1.0f / (max - min);
+    g_gwalls_b = static_cast<float>(-min) / (max - min);
+}
+
 void GlassWall::Impl::UpdateDepths()
 {
+    assert(!g_gwalls.empty());
     auto it = g_gwalls.begin();
     assert(it != g_gwalls.end());
     int min = it->second->DepthLevel(), max = it->second->DepthLevel();
@@ -56,8 +65,18 @@ void GlassWall::Impl::UpdateDepths()
         auto dl = it->second->DepthLevel();
         if (dl > max) max = dl; else if (dl < min) min = dl;
     }
-    g_gwalls_k = 1.0f / (max - min);
-    g_gwalls_b = static_cast<float>(-min) / (max - min);
+    CalcCoefsFromMinAndMax(min, max);
+}
+
+void GlassWall::Impl::UpdateDepthsOnConctruction()
+{
+    int min = m_depthLevel, max = m_depthLevel;
+    for (auto it = g_gwalls.begin(); it != g_gwalls.end(); ++it)
+    {
+        auto dl = it->second->DepthLevel();
+        if (dl > max) max = dl; else if (dl < min) min = dl;
+    }
+    CalcCoefsFromMinAndMax(min, max);
 }
 
 GLfloat GlassWall::Impl::MyDepth()
@@ -85,8 +104,6 @@ void GlassWall::Impl::ReallocateVBO()
 
 void GlassWall::Impl::SetupVAO(GLuint vao, OpenGLFunctions * f)
 {
-    assert(f->glIsVertexArray(vao) == GL_TRUE);
-
     f->glBindVertexArray(vao);
 
     f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
@@ -102,6 +119,15 @@ void GlassWall::Impl::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
     m_edgeColors.push_back(edgeColor);
     m_fillColors.push_back(fillColor);
     m_vboNeedsToBeReallocated = true;
+}
+
+
+
+void QColorToGLfloat3(QColor c, GLfloat (&out)[3])
+{
+    out[0] = static_cast<float>(c.redF  ());
+    out[1] = static_cast<float>(c.greenF());
+    out[2] = static_cast<float>(c.blueF ());
 }
 
 struct GlassWall_DrawNonTransparent_GLProgram {
@@ -146,11 +172,8 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f)
     program.p.setUniformValue(2, m_edgeColors[0]);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
-    if (!ready) SetupVAO(vao, f);
-    if (!m_vbo->bind()) assert(false);
-
-    f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_TRUE, 0, nullptr);
-    f->glEnableVertexAttribArray(0);
+    if (!ready) SetupVAO(vao, f);auto error = f->glGetError();
+    if (!m_vbo->bind()) assert(false);error = f->glGetError();
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
@@ -198,21 +221,19 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f)
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
-    static GlassWall_DrawNonTransparent_GLProgram program;
+    static GlassWall_DrawTransparent_GLProgram program;
     assert (program.p.isLinked());
     if (!program.p.bind()) assert(false);
 
-    program.p.setUniformValue(0, MyDepth());
-    program.p.setUniformValue(1, m_transformation);//TODO: make it mat2
-    program.p.setUniformValue(2, m_edgeColors[0]);
-    program.p.setUniformValue(3, 0.5f);
+    f->glUniform1f(0, MyDepth());
+    f->glUniformMatrix3fv(1, 1, GL_FALSE, m_transformation.data());
+    float color[3]; QColorToGLfloat3(m_edgeColors[0], color);
+    f->glUniform3fv(2, 1, color);
+    f->glUniform1f(3, 0.5f);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
     if (!ready) SetupVAO(vao, f);
     if (!m_vbo->bind()) assert(false);
-
-    f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_TRUE, 0, nullptr);
-    f->glEnableVertexAttribArray(0);
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
@@ -224,11 +245,15 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f)
 
 
 
-void GlassWall::MakeInstance(std::string name, int depthLevel)
+GlassWall & GlassWall::MakeInstance(std::string name, int depthLevel)
 {
-    auto it = g_gwalls.find(name);
-    if (it != g_gwalls.end()) throw GlassWallException_CantInsert();
-    g_gwalls.insert(std::pair{name, std::unique_ptr<GlassWall>(new GlassWall(depthLevel))});
+    auto hint = g_gwalls.find(name);
+    if (hint != g_gwalls.end()) throw GlassWallException_CantInsert();
+    auto iter = g_gwalls.insert(hint, std::pair{ name, std::unique_ptr<GlassWall>(
+                                                       new GlassWall(depthLevel) )
+                                               }
+                               );
+    return *iter->second;
 }
 
 GlassWall & GlassWall::FindInstance(std::string name)

@@ -21,7 +21,7 @@ struct VAO_Holder::Impl
                      > wgt_vao_map;
 };
 
-VAO_Holder::VAO_Holder()
+VAO_Holder::VAO_Holder() : impl(std::make_unique<Impl>())
 {
     for (auto wgt : g_GLWidgets)
         impl->wgt_vao_map.emplace(wgt->context(), std::pair{ wgt->GenVAO(), false });
@@ -31,6 +31,7 @@ VAO_Holder::VAO_Holder()
     {
         auto it = impl->wgt_vao_map.find(sender->context());
         assert(it != impl->wgt_vao_map.end());
+        impl->wgt_vao_map.erase(it);
     });
     connect(&GLWidgetSignalEmitter::Instance(), &GLWidgetSignalEmitter::ComingToLife,
             this, [this](GLWidget * sender)

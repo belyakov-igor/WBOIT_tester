@@ -7,6 +7,7 @@
 #include <QLayout>
 
 #include "GLWidget.h"
+#include "GlassWall.h"
 
 MainWindow::MainWindow(QWidget * parent) :
     QMainWindow(parent),
@@ -14,11 +15,17 @@ MainWindow::MainWindow(QWidget * parent) :
 {
     ui->setupUi(this);
 
-    auto glay = new QGridLayout(this);
+    auto glay = new QGridLayout(centralWidget());
     centralWidget()->setLayout(glay);
 
     auto wgt = new GLWidget(this);
     glay->addWidget(wgt, 0, 0);
+}
+
+void MainWindow::InitWalls() const
+{
+    auto & wall = GlassWall::MakeInstance("#1", 0);
+    wall.AddTriangle({-0.5f, -0.5f}, {0.5f, -0.5f}, {0.0f, 0.5f}, Qt::white, Qt::green);
 }
 
 MainWindow::~MainWindow()

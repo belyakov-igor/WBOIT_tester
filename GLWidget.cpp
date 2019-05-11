@@ -324,7 +324,6 @@ void GLWidget::ApplyTTextures()
     if (!context()->makeCurrent(context()->surface())) throw "wtf???";
     makeCurrent();
     auto f = GLFunctions();
-
     GLuint ret;
     f->glGenVertexArrays(1, &ret);
     assert(impl->vaos.find(ret) == impl->vaos.end());

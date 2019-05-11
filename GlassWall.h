@@ -27,7 +27,7 @@ public:
       { return "There is no glass wall with this name"; }
     };
 
-    static void MakeInstance(std::string name, int depthLevel);
+    static GlassWall & MakeInstance(std::string name, int depthLevel);
     static GlassWall & FindInstance(std::string name);
 
     ~GlassWall() = default;
