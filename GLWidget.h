@@ -14,38 +14,14 @@ class GLWidget : public QOpenGLWidget
 public:
     explicit GLWidget(QWidget * parent);
     ~GLWidget() override;
+
+    [[nodiscard]] GLuint GenVAO();
+    [[nodiscard]] bool DeleteVAO(GLuint vao);
 protected:
     void initializeGL() override;
     void resizeGL(int width, int height) override;
     void paintGL() override;
 
-private:
-    static OpenGLFunctions * GLFunctions();
-
-    // Transparent drawing ===============================================
-    GLuint m_Tframebuffer1      = 0; // Render
-    GLuint m_TColorTexture1     = 0; // non-transparent
-    GLuint m_TDepthRenderbuffer = 0; // objects here
-
-    GLuint m_Tframebuffer2  = 0; // Render
-    GLuint m_TColorTexture2 = 0; // transparent
-    GLuint m_TAlphaTexture2 = 0; // objects here
-
-    void InitializeTFramebuffers();
-    void AllocateTTextures(int w, int h);
-    void AllocateTTextures();
-    void SetupTTextureProgram();
-    void CleanupAfterTTextureRendering();
-    void ApplyTTextures();
-
-    void paintGL_FirstRenderingPass();
-    void paintGL_SecondRenderingPass();
-    void paintGL_ThirdRenderingPass();
-    // /Transparent drawing ==============================================
-
-public:
-    [[nodiscard]] GLuint GenVAO();
-    [[nodiscard]] bool DeleteVAO(GLuint vao);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;
