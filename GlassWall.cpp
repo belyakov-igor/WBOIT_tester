@@ -37,8 +37,8 @@ struct GlassWall::Impl
     void AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                       QColor edgeColor, QColor fillColor     );
 
-    void DrawNonTransparent(OpenGLFunctions * f);
-    void DrawTransparent   (OpenGLFunctions * f);
+    void DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat);
+    void DrawTransparent   (OpenGLFunctions * f, QMatrix3x3 projMat);
 };
 
 GlassWall::GlassWall(int depthLevel) : impl(std::make_unique<Impl>(depthLevel)) {}
@@ -157,7 +157,7 @@ struct GlassWall_DrawNonTransparent_GLProgram {
     }
 };
 
-void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f)
+void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat)
 {
     if (m_vertices.empty()) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
@@ -168,7 +168,7 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f)
     if (!program.p.bind()) assert(false);
 
     program.p.setUniformValue(0, MyDepth());
-    program.p.setUniformValue(1, m_transformation);
+    program.p.setUniformValue(1, (projMat * m_transformation));
     program.p.setUniformValue(2, m_edgeColors[0]);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
@@ -215,7 +215,7 @@ struct GlassWall_DrawTransparent_GLProgram {
     }
 };
 
-void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f)
+void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, QMatrix3x3 projMat)
 {
     if (m_vertices.empty()) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
@@ -226,7 +226,7 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f)
     if (!program.p.bind()) assert(false);
 
     f->glUniform1f(0, MyDepth());
-    f->glUniformMatrix3fv(1, 1, GL_FALSE, m_transformation.data());
+    f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
     float color[3]; QColorToGLfloat3(m_edgeColors[0], color);
     f->glUniform3fv(2, 1, color);
     f->glUniform1f(3, 0.5f);
@@ -273,9 +273,9 @@ void GlassWall::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                              QColor edgeColor, QColor fillColor     )
 { impl->AddTriangle(a, b, c, edgeColor, fillColor); }
 
-void GlassWall::DrawNonTransparent(OpenGLFunctions * f) { impl->DrawNonTransparent(f); }
+void GlassWall::DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat) { impl->DrawNonTransparent(f, projMat); }
 
-void GlassWall::DrawTransparent   (OpenGLFunctions * f) { impl->DrawTransparent(f); }
+void GlassWall::DrawTransparent   (OpenGLFunctions * f, QMatrix3x3 projMat) { impl->DrawTransparent   (f, projMat); }
 
 GlassWallIterator & GlassWallIterator::Instance() { static GlassWallIterator ins; return ins; }
 

@@ -8,7 +8,7 @@
 #include "GLWidget.h"
 
 const double g_pi = 3.1415926535897932384626433832795;
-const float & g_pi_f = static_cast<const float &>(g_pi);
+const float g_pi_f = static_cast<const float>(g_pi);
 
 struct VAO_Holder::Impl
 {

@@ -22,9 +22,6 @@ protected:
 private:
     static OpenGLFunctions * GLFunctions();
 
-    QMatrix4x4 m_projectionMatrix;
-	int m_width = 0, m_height = 0;
-
     // Transparent drawing ===============================================
     GLuint m_Tframebuffer1      = 0; // Render
     GLuint m_TColorTexture1     = 0; // non-transparent

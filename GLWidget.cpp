@@ -19,6 +19,9 @@ GLWidgetSignalEmitter & GLWidgetSignalEmitter::Instance()
 struct GLWidget::Impl
 {
     std::unordered_set<GLuint> vaos;
+
+    int width = 0, height = 0;
+    QMatrix3x3 projMat;
 };
 
 
@@ -84,18 +87,20 @@ void GLWidget::initializeGL()
 void GLWidget::resizeGL(int width, int height)
 {
     auto f = GLFunctions();
-	m_width = width; m_height = height;
+    impl->width = width; impl->height = height;
     f->glViewport(0, 0, width, height);
 	
 	float aspect = static_cast<float>(width) / height;
 	
-    float halfHeight = 0.5f, halfWidth = 0.5f;
+    float halfHeight = 1.0f, halfWidth = 1.0f;
 	if (width > height) halfWidth  *= aspect;
-	else                halfHeight /= aspect;
-	float nearPlane = 0.0f, farPlane = 1.0f;
-    m_projectionMatrix.ortho( -halfWidth , halfWidth ,
-                              -halfHeight, halfHeight,
-                               nearPlane , farPlane    );
+    else                halfHeight /= aspect;
+
+    float matdata[] = { 1 / halfWidth , 0             , 0,
+                        0             , 1 / halfHeight, 0,
+                        0             , 0             , 1  };
+
+    std::copy(matdata, matdata + 6, impl->projMat.data());
 
     AllocateTTextures();
 }
@@ -130,7 +135,7 @@ void GLWidget::paintGL_FirstRenderingPass()
     f->glClearBufferfv(GL_DEPTH, 0, &clearDepth);
 
     auto & iter = GlassWallIterator::Instance();
-    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawNonTransparent(f);
+    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawNonTransparent(f, impl->projMat);
 }
 
 void GLWidget::paintGL_SecondRenderingPass()
@@ -146,7 +151,7 @@ void GLWidget::paintGL_SecondRenderingPass()
     SetupTTextureProgram();
 
     auto & iter = GlassWallIterator::Instance();
-    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawTransparent(f);
+    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawTransparent(f, impl->projMat);
 
     CleanupAfterTTextureRendering();
 }
@@ -213,7 +218,7 @@ void GLWidget::AllocateTTextures(int w, int h)
 }
 
 void GLWidget::AllocateTTextures()
-{ AllocateTTextures(m_width, m_height); }
+{ AllocateTTextures(impl->width, impl->height); }
 
 
 
@@ -253,44 +258,35 @@ struct ApplyTTexturesGLResources {
     {
         if (!program.addShaderFromSourceCode(
                     QOpenGLShader::Vertex,
-                    "#version 430                                  \n"
-                    "const vec2 p[4] = vec2[4]                     \n"
-                    "    (   vec2(-1, -1), vec2( 1, -1),           \n"
-                    "        vec2( 1,  1), vec2(-1,  1)    );      \n"
-                    "void main()                                   \n"
-                    "{ gl_Position = vec4(p[gl_VertexID], 0, 1); } \n"
+                    "#version 430                                                 \n"
+                    "const vec2 p[4] = vec2[4](                                   \n"
+                    "     vec2(-1, -1), vec2( 1, -1), vec2( 1,  1), vec2(-1,  1)  \n"
+                    "                         );                                  \n"
+                    "void main() { gl_Position = vec4(p[gl_VertexID], 0, 1); }    \n"
                                             )
            ) assert(false);
         if (!program.addShaderFromSourceCode(
                     QOpenGLShader::Fragment,
-                    "#version 430                                       \n"
-                    "out vec4 outColor;                                 \n"
-                    "                                                   \n"
-                    "layout (location = 0) uniform  sampler2DMS colorTexture; \n"
-                    "layout (location = 1) uniform  sampler2DMS tcolorTexture;\n"
-                    "layout (location = 2) uniform  sampler2DMS  alphaTexture;\n"
-                    "                                                   \n"
-                    "void main() {                                      \n"
-                    "    ivec2 upos = ivec2(gl_FragCoord.xy);           \n"
-                    "    vec4  cc    = texelFetch(                      \n"
-                    "                  tcolorTexture, upos, gl_SampleID \n"
-                    "                            );                     \n"
-                    "    vec3 sumOfTColors = cc.rgb;                    \n"
-                    "    float sumOfWeights = cc.a;                     \n"
-                    "    vec3  color = texelFetch(                      \n"
-                    "                   colorTexture, upos, gl_SampleID \n"
-                    "                            ).rgb;                 \n"
-                    "    if (sumOfWeights == 0)                         \n"
-                    "    { outColor = vec4(color, 1.0); return; }       \n"
-                    "    float alpha = 1 - texelFetch(                  \n"
-                    "                   alphaTexture, upos, gl_SampleID \n"
-                    "                                ).r;               \n"
-                    "    color = sumOfTColors / sumOfWeights * alpha    \n"
-                    "                + color * (1 - alpha);             \n"
-                    "    outColor = vec4(color, 1.0);                   \n"
-
-                    "    outColor = vec4(color, 1.0); return;           \n"
-                    "}                                                  \n"
+                    "#version 430                                                          \n"
+                    "out vec4 outColor;                                                    \n"
+                    "                                                                      \n"
+                    "layout (location = 0) uniform  sampler2DMS colorTexture;              \n"
+                    "layout (location = 1) uniform  sampler2DMS tcolorTexture;             \n"
+                    "layout (location = 2) uniform  sampler2DMS  alphaTexture;             \n"
+                    "                                                                      \n"
+                    "void main() {                                                         \n"
+                    "    ivec2 upos = ivec2(gl_FragCoord.xy);                              \n"
+                    "    vec4 cc = texelFetch(tcolorTexture, upos, gl_SampleID);           \n"
+                    "    vec3 sumOfTColors = cc.rgb;                                       \n"
+                    "    float sumOfWeights = cc.a;                                        \n"
+                    "    vec3  color = texelFetch(colorTexture, upos, gl_SampleID).rgb;    \n"
+                    "    if (sumOfWeights == 0)                                            \n"
+                    "    { outColor = vec4(color, 1.0); return; }                          \n"
+                    "    float alpha = 1 - texelFetch(alphaTexture, upos, gl_SampleID).r;  \n"
+                    "    color = sumOfTColors / sumOfWeights * alpha + color * (1 - alpha);\n"
+                    "    outColor = vec4(color, 1.0);                                      \n"
+                    "    outColor = vec4(color, 1.0); return;                              \n"
+                    "}                                                                     \n"
                                             )
            ) assert(false);
         if (!program.link()) assert(false);

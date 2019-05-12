@@ -10,7 +10,7 @@
 using OpenGLFunctions = QOpenGLFunctions_4_5_Core;
 
 extern const double g_pi;
-extern const float & g_pi_f;
+extern const float g_pi_f;
 
 class VAO_Holder // gen VAO in all GL contexts in ctor; delete VAO in all GL contexts in dtor
         : public QObject
