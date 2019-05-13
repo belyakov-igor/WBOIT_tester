@@ -31,14 +31,14 @@ struct GlassWall::Impl
 
     int  DepthLevel(       ) const { return m_depthLevel; }
     void DepthLevel(int lvl)       { m_depthLevel = lvl; UpdateDepths(); }
-    QMatrix3x3 Transformation(            ) const { return m_transformation; }
-    void       Transformation(QMatrix3x3 t)       { m_transformation = t;    }
+    QMatrix3x3 Transformation(            ) const { return m_transformation;            }
+    void       Transformation(QMatrix3x3 t)       { m_transformation = std::move(t);    }
 
     void AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                       QColor edgeColor, QColor fillColor     );
 
-    void DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat);
-    void DrawTransparent   (OpenGLFunctions * f, QMatrix3x3 projMat);
+    void DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
 };
 
 GlassWall::GlassWall(int depthLevel) : impl(std::make_unique<Impl>(depthLevel)) {}
@@ -157,7 +157,7 @@ struct GlassWall_DrawNonTransparent_GLProgram {
     }
 };
 
-void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat)
+void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
     if (m_vertices.empty()) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
@@ -172,8 +172,8 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat
     program.p.setUniformValue(2, m_edgeColors[0]);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
-    if (!ready) SetupVAO(vao, f);auto error = f->glGetError();
-    if (!m_vbo->bind()) assert(false);error = f->glGetError();
+    if (!ready) SetupVAO(vao, f);
+    if (!m_vbo->bind()) assert(false);
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
@@ -215,7 +215,7 @@ struct GlassWall_DrawTransparent_GLProgram {
     }
 };
 
-void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, QMatrix3x3 projMat)
+void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
     if (m_vertices.empty()) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
@@ -256,7 +256,7 @@ GlassWall & GlassWall::MakeInstance(std::string name, int depthLevel)
     return *iter->second;
 }
 
-GlassWall & GlassWall::FindInstance(std::string name)
+GlassWall & GlassWall::FindInstance(const std::string & name)
 {
     auto it = g_gwalls.find(name);
     if (it == g_gwalls.end()) throw GlassWallException_CantFind();
@@ -265,17 +265,22 @@ GlassWall & GlassWall::FindInstance(std::string name)
 
 int  GlassWall::DepthLevel(       ) const { return impl->DepthLevel(); }
 void GlassWall::DepthLevel(int lvl)       { impl->DepthLevel(lvl);     }
-QMatrix3x3 GlassWall::Transformation(            ) const { return impl->Transformation(); }
-void       GlassWall::Transformation(QMatrix3x3 t)       { impl->Transformation(t);       }
+
+QMatrix3x3 GlassWall::Transformation(            ) const
+{ return impl->Transformation(); }
+void       GlassWall::Transformation(QMatrix3x3 t)
+{ impl->Transformation(std::move(t)); }
 
 
 void GlassWall::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                              QColor edgeColor, QColor fillColor     )
 { impl->AddTriangle(a, b, c, edgeColor, fillColor); }
 
-void GlassWall::DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat) { impl->DrawNonTransparent(f, projMat); }
+void GlassWall::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawNonTransparent(f, projMat); }
 
-void GlassWall::DrawTransparent   (OpenGLFunctions * f, QMatrix3x3 projMat) { impl->DrawTransparent   (f, projMat); }
+void GlassWall::DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparent   (f, projMat); }
 
 GlassWallIterator & GlassWallIterator::Instance() { static GlassWallIterator ins; return ins; }
 

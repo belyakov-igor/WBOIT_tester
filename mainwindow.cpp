@@ -22,7 +22,7 @@ MainWindow::MainWindow(QWidget * parent) :
     glay->addWidget(wgt, 0, 0);
 }
 
-QVector2D Mult(const QVector2D & vec, const QMatrix2x2 & mat)
+QVector2D Mult(QVector2D vec, QMatrix2x2 mat)
 {
     return { mat(0, 0) * vec.x() + mat(0, 1) * vec.y(),
              mat(1, 0) * vec.x() + mat(1, 1) * vec.y()  };

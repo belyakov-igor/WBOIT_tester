@@ -28,7 +28,7 @@ public:
     };
 
     static GlassWall & MakeInstance(std::string name, int depthLevel);
-    static GlassWall & FindInstance(std::string name);
+    static GlassWall & FindInstance(const std::string & name);
 
     ~GlassWall() = default;
     GlassWall(const GlassWall & ) = delete;
@@ -43,8 +43,8 @@ public:
 
     void AddTriangle(QVector2D a, QVector2D b, QVector2D c, QColor edgeColor, QColor fillColor);
 
-    void DrawNonTransparent(OpenGLFunctions * f, QMatrix3x3 projMat);
-    void DrawTransparent   (OpenGLFunctions * f, QMatrix3x3 projMat);
+    void DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
 
 private:
     struct Impl; std::unique_ptr<Impl> impl;

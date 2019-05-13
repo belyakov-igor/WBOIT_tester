@@ -123,7 +123,7 @@ void GLWidget::resizeGL(int width, int height)
                         0             , 1 / halfHeight, 0,
                         0             , 0             , 1  };
 
-    std::copy(matdata, matdata + 6, impl->projMat.data());
+    std::copy(matdata, matdata + 9, impl->projMat.data());
 
     impl->AllocateTTextures();
 }
