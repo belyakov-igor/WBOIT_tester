@@ -3,10 +3,6 @@
 
 #include <QMainWindow>
 
-namespace Ui {
-class MainWindow;
-}
-
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -16,9 +12,11 @@ public:
     ~MainWindow();
 
     void InitWalls() const;
+    void UpdateWalls(float p) const;
 
 private:
-    Ui::MainWindow *ui;
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 };
 
 #endif // MAINWINDOW_H
