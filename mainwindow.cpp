@@ -65,8 +65,8 @@ void MainWindow::InitWalls() const
     static const QMatrix2x2 rot(rotdata);
     QMatrix2x2 rot_t{};
 
-    auto & wall1 = GlassWall::MakeInstance(0);
-    auto & wall2 = GlassWall::MakeInstance(1);
+    auto & wall1 = GlassWall::MakeInstance(0, 0.5f, true);
+    auto & wall2 = GlassWall::MakeInstance(1, 0.5f, true);
     for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
     {
         wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),

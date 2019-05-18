@@ -8,8 +8,13 @@
 
 struct GlassWall::Impl
 {
-    explicit Impl(int depthLevel) : m_depthLevel(depthLevel) { UpdateDepthsOnConctruction(); }
-    int m_depthLevel;
+    explicit Impl(int depthLevel, float opacity, bool transparent)
+        : m_depthLevel(depthLevel), m_opacity(opacity), m_transparent(transparent)
+    {
+        if (opacity < 0 || opacity > 1) throw GlassWallException_CantConstruct();
+        UpdateDepthsOnConctruction();
+    }
+    int m_depthLevel; float m_opacity; bool m_transparent;
     QMatrix3x3 m_transformation;
 
     static void UpdateDepths();
@@ -29,10 +34,14 @@ struct GlassWall::Impl
     void ReallocateVBO();
     void SetupVAO(GLuint vao, OpenGLFunctions * f);
 
-    int  DepthLevel(       ) const { return m_depthLevel; }
+    int  DepthLevel(       ) const { return m_depthLevel;                }
     void DepthLevel(int lvl)       { m_depthLevel = lvl; UpdateDepths(); }
-    QMatrix3x3 Transformation(            ) const { return m_transformation;            }
-    void       Transformation(QMatrix3x3 t)       { m_transformation = std::move(t);    }
+    float Opacity(             ) const { return m_opacity;    }
+    void  Opacity(float opacity)       { m_opacity = opacity; }
+    bool Transparent(                ) const { return m_transparent;        }
+    void Transparent(bool transparent)       { m_transparent = transparent; }
+    QMatrix3x3 Transformation(            ) const { return m_transformation;         }
+    void       Transformation(QMatrix3x3 t)       { m_transformation = std::move(t); }
 
     void AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                       QColor edgeColor, QColor fillColor     );
@@ -41,7 +50,8 @@ struct GlassWall::Impl
     void DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
 };
 
-GlassWall::GlassWall(int depthLevel) : impl(std::make_unique<Impl>(depthLevel)) {}
+GlassWall::GlassWall(int depthLevel, float opacity, bool transparent)
+    : impl(std::make_unique<Impl>(depthLevel, opacity, transparent)) {}
 
 static std::map<int, std::unique_ptr<GlassWall>> g_gwalls;
 // iterate from far to near
@@ -138,9 +148,11 @@ void GlassWall::Impl::SetupVAO(GLuint vao, OpenGLFunctions * f)
     GLsizei stride = sizeof(QVector2D) + 2;
     f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
     f->glEnableVertexAttribArray(0);
-    f->glVertexAttribIPointer(1, 1, GL_UNSIGNED_BYTE, stride, reinterpret_cast<void *>(sizeof(QVector2D)));
+    f->glVertexAttribIPointer( 1, 1, GL_UNSIGNED_BYTE, stride,
+                               reinterpret_cast<void *>(sizeof(QVector2D)    ) );
     f->glEnableVertexAttribArray(1);
-    f->glVertexAttribIPointer(2, 1, GL_UNSIGNED_BYTE, stride, reinterpret_cast<void *>(sizeof(QVector2D) + 1));
+    f->glVertexAttribIPointer( 2, 1, GL_UNSIGNED_BYTE, stride,
+                               reinterpret_cast<void *>(sizeof(QVector2D) + 1) );
     f->glEnableVertexAttribArray(2);
 
     m_vaoHolder.VAO_SetReady();
@@ -170,36 +182,41 @@ struct GlassWall_DrawNonTransparent_GLProgram {
                     "                                                             \n"
                     "layout (location = 0) uniform float d;                       \n"
                     "layout (location = 1) uniform mat3 tr;                       \n"
+                    "layout (location = 2) uniform bool drawEdges;                \n"
                     "                                                             \n"
                     "out float colorComponent;                                    \n"
                     "                                                             \n"
                     "void main()                                                  \n"
                     "{                                                            \n"
                     "    gl_Position = vec4(tr * vec3(vertex, d), 1);             \n"
-                    "    colorComponent = float(edgeColorComponent) / 255;        \n"
+                    "    colorComponent = float( drawEdges ? edgeColorComponent   \n"
+                    "                                      : fillColorComponent   \n"
+                    "                          ) / 255;                           \n"
                     "}                                                            \n"
                                       )
            ) assert(false);
         if (!p.addShaderFromSourceCode(
                     QOpenGLShader::Geometry,
-                    "#version 430 core                                                          \n"
-                    "layout (triangles) in;                                                     \n"
-                    "layout (triangle_strip, max_vertices = 3) out;                             \n"
-                    "                                                                           \n"
-                    "in float colorComponent[];                                                 \n"
-                    "out vec3 color;                                                            \n"
-                    "                                                                           \n"
-                    "void main()                                                                \n"
-                    "{                                                                          \n"
-                    "    color = vec3(colorComponent[0], colorComponent[1], colorComponent[2]); \n"
-                    "                                                                           \n"
-                    "    gl_Position = gl_in[0].gl_Position;                                    \n"
-                    "    EmitVertex();                                                          \n"
-                    "    gl_Position = gl_in[1].gl_Position;                                    \n"
-                    "    EmitVertex();                                                          \n"
-                    "    gl_Position = gl_in[2].gl_Position;                                    \n"
-                    "    EmitVertex(); EndPrimitive();                                          \n"
-                    "}                                                                          \n"
+                    "#version 430 core                              \n"
+                    "layout (triangles) in;                         \n"
+                    "layout (triangle_strip, max_vertices = 3) out; \n"
+                    "                                               \n"
+                    "in float colorComponent[];                     \n"
+                    "out vec3 color;                                \n"
+                    "                                               \n"
+                    "void main()                                    \n"
+                    "{                                              \n"
+                    "    color = vec3( colorComponent[0],           \n"
+                    "                  colorComponent[1],           \n"
+                    "                  colorComponent[2]  );        \n"
+                    "                                               \n"
+                    "    gl_Position = gl_in[0].gl_Position;        \n"
+                    "    EmitVertex();                              \n"
+                    "    gl_Position = gl_in[1].gl_Position;        \n"
+                    "    EmitVertex();                              \n"
+                    "    gl_Position = gl_in[2].gl_Position;        \n"
+                    "    EmitVertex(); EndPrimitive();              \n"
+                    "}                                              \n"
                                       )
            ) assert(false);
         if (!p.addShaderFromSourceCode(
@@ -228,6 +245,7 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 &
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
+    f->glUniform1i(2, GL_TRUE);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
     f->glBindVertexArray(vao);
@@ -238,8 +256,16 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 &
     f->glEnable(GL_MULTISAMPLE);
     f->glDepthFunc(GL_LEQUAL);
     f->glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    f->glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));f->glBindVertexArray(0);
+    f->glDrawArrays( GL_TRIANGLES, 0,
+                     static_cast<GLsizei>(m_vertices.size()) );
     f->glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    if (!m_transparent)
+    {
+        f->glUniform1i(2, GL_FALSE);
+        f->glDrawArrays( GL_TRIANGLES, 0,
+                         static_cast<GLsizei>(m_vertices.size()) );
+    }
+    f->glBindVertexArray(0);
 }
 
 struct GlassWall_DrawTransparent_GLProgram {
@@ -267,24 +293,26 @@ struct GlassWall_DrawTransparent_GLProgram {
            ) assert(false);
         if (!p.addShaderFromSourceCode(
                     QOpenGLShader::Geometry,
-                    "#version 430 core                                                          \n"
-                    "layout (triangles) in;                                                     \n"
-                    "layout (triangle_strip, max_vertices = 3) out;                             \n"
-                    "                                                                           \n"
-                    "in float colorComponent[];                                                 \n"
-                    "out vec3 color;                                                            \n"
-                    "                                                                           \n"
-                    "void main()                                                                \n"
-                    "{                                                                          \n"
-                    "    color = vec3(colorComponent[0], colorComponent[1], colorComponent[2]); \n"
-                    "                                                                           \n"
-                    "    gl_Position = gl_in[0].gl_Position;                                    \n"
-                    "    EmitVertex();                                                          \n"
-                    "    gl_Position = gl_in[1].gl_Position;                                    \n"
-                    "    EmitVertex();                                                          \n"
-                    "    gl_Position = gl_in[2].gl_Position;                                    \n"
-                    "    EmitVertex(); EndPrimitive();                                          \n"
-                    "}                                                                          \n"
+                    "#version 430 core                              \n"
+                    "layout (triangles) in;                         \n"
+                    "layout (triangle_strip, max_vertices = 3) out; \n"
+                    "                                               \n"
+                    "in float colorComponent[];                     \n"
+                    "out vec3 color;                                \n"
+                    "                                               \n"
+                    "void main()                                    \n"
+                    "{                                              \n"
+                    "    color = vec3( colorComponent[0],           \n"
+                    "                  colorComponent[1],           \n"
+                    "                  colorComponent[2]  );        \n"
+                    "                                               \n"
+                    "    gl_Position = gl_in[0].gl_Position;        \n"
+                    "    EmitVertex();                              \n"
+                    "    gl_Position = gl_in[1].gl_Position;        \n"
+                    "    EmitVertex();                              \n"
+                    "    gl_Position = gl_in[2].gl_Position;        \n"
+                    "    EmitVertex(); EndPrimitive();              \n"
+                    "}                                              \n"
                                       )
            ) assert(false);
         if (!p.addShaderFromSourceCode(
@@ -310,7 +338,7 @@ struct GlassWall_DrawTransparent_GLProgram {
 
 void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
-    if (m_vertices.empty()) return;
+    if (m_vertices.empty() || !m_transparent) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
@@ -320,7 +348,7 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & pr
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
-    f->glUniform1f(2, 0.5f);
+    f->glUniform1f(2, m_opacity);
 
     auto [vao, ready] = m_vaoHolder.GetVAO();
     f->glBindVertexArray(vao);
@@ -337,12 +365,14 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & pr
 
 
 
-GlassWall & GlassWall::MakeInstance(int depthLevel)
+GlassWall & GlassWall::MakeInstance(int depthLevel, float opacity, bool transparent)
 {
     auto hint = g_gwalls.find(depthLevel);
     if (hint != g_gwalls.end()) throw GlassWallException_CantInsert();
-    auto iter = g_gwalls.insert(hint, std::pair{ depthLevel, std::unique_ptr<GlassWall>(
-                                                             new GlassWall(depthLevel) )
+    auto iter = g_gwalls.insert(hint, std::pair{ depthLevel,
+                                                 std::unique_ptr<GlassWall>(
+                                         new GlassWall(depthLevel, opacity, transparent)
+                                                                           )
                                                }
                                );
     return *iter->second;
@@ -357,6 +387,11 @@ GlassWall & GlassWall::FindInstance(int depthLevel)
 
 int  GlassWall::DepthLevel(       ) const { return impl->DepthLevel(); }
 void GlassWall::DepthLevel(int lvl)       { impl->DepthLevel(lvl);     }
+
+float GlassWall::Opacity(             ) const { return impl->Opacity(); }
+void  GlassWall::Opacity(float opacity)       { impl->Opacity(opacity); }
+bool GlassWall::Transparent(                ) const { return impl->Transparent();     }
+void GlassWall::Transparent(bool transparent)       { impl->Transparent(transparent); }
 
 QMatrix3x3 GlassWall::Transformation(            ) const
 { return impl->Transformation(); }
