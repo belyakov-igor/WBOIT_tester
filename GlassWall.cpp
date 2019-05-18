@@ -3,7 +3,7 @@
 
 #include "GlassWall.h"
 
-#include <unordered_map>
+#include <map>
 #include <QOpenGLShaderProgram>
 
 struct GlassWall::Impl
@@ -43,8 +43,9 @@ struct GlassWall::Impl
 
 GlassWall::GlassWall(int depthLevel) : impl(std::make_unique<Impl>(depthLevel)) {}
 
-static std::unordered_map<std::string, std::unique_ptr<GlassWall>> g_gwalls;
-static std::unordered_map<std::string, std::unique_ptr<GlassWall>>::iterator g_gwallsIter;
+static std::map<int, std::unique_ptr<GlassWall>> g_gwalls;
+// iterate from far to near
+static std::map<int, std::unique_ptr<GlassWall>>::reverse_iterator g_gwallsIter;
 static float g_gwalls_k, g_gwalls_b; // depth = k * depthLevel + b;
 
 static void CalcCoefsFromMinAndMax(int min, int max)
@@ -336,20 +337,20 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & pr
 
 
 
-GlassWall & GlassWall::MakeInstance(std::string name, int depthLevel)
+GlassWall & GlassWall::MakeInstance(int depthLevel)
 {
-    auto hint = g_gwalls.find(name);
+    auto hint = g_gwalls.find(depthLevel);
     if (hint != g_gwalls.end()) throw GlassWallException_CantInsert();
-    auto iter = g_gwalls.insert(hint, std::pair{ name, std::unique_ptr<GlassWall>(
-                                                       new GlassWall(depthLevel) )
+    auto iter = g_gwalls.insert(hint, std::pair{ depthLevel, std::unique_ptr<GlassWall>(
+                                                             new GlassWall(depthLevel) )
                                                }
                                );
     return *iter->second;
 }
 
-GlassWall & GlassWall::FindInstance(const std::string & name)
+GlassWall & GlassWall::FindInstance(int depthLevel)
 {
-    auto it = g_gwalls.find(name);
+    auto it = g_gwalls.find(depthLevel);
     if (it == g_gwalls.end()) throw GlassWallException_CantFind();
     return *it->second;
 }
@@ -375,10 +376,10 @@ void GlassWall::DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projM
 
 GlassWallIterator & GlassWallIterator::Instance() { static GlassWallIterator ins; return ins; }
 
-void GlassWallIterator::Reset() { g_gwallsIter = g_gwalls.begin(); }
+void GlassWallIterator::Reset() { g_gwallsIter = g_gwalls.rbegin(); }
 
 GlassWallIterator & GlassWallIterator::operator++() { ++g_gwallsIter; return *this; }
 
 GlassWall & GlassWallIterator::operator*() { return *g_gwallsIter->second; }
 
-bool GlassWallIterator::AtEnd() { return g_gwallsIter == g_gwalls.end(); }
+bool GlassWallIterator::AtEnd() { return g_gwallsIter == g_gwalls.rend(); }

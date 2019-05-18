@@ -52,7 +52,7 @@ QVector2D Mult(QVector2D vec, QMatrix2x2 mat)
 
 void MainWindow::InitWalls() const
 {
-    static constexpr QVector2D a{-0.1f, -0.8f}, b{0.1f, -0.8f}, c{0.0f, -0.5f};
+    static constexpr QVector2D a{-0.1f, -0.6f}, b{0.1f, -0.6f}, c{0.0f, -0.9f};
     static constexpr QVector2D d{-0.1f, -0.9f}, e{0.1f, -0.9f}, f{0.0f, -0.6f};
     QColor clrs [] = { QColor(255, 0, 0), QColor(255, 130, 0), QColor(255, 220, 0),
                        QColor(0, 255, 0), QColor(0, 200, 255), QColor(0, 100, 255),
@@ -65,8 +65,8 @@ void MainWindow::InitWalls() const
     static const QMatrix2x2 rot(rotdata);
     QMatrix2x2 rot_t{};
 
-    auto & wall1 = GlassWall::MakeInstance("#1", 0);
-    auto & wall2 = GlassWall::MakeInstance("#2", 0);
+    auto & wall1 = GlassWall::MakeInstance(0);
+    auto & wall2 = GlassWall::MakeInstance(1);
     for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
     {
         wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
@@ -86,9 +86,9 @@ void MainWindow::UpdateWalls(float p) const
     float trData2 [] = {  cos, -sin, 0,
                           sin,  cos, 0,
                             0,    0, 1  };
-    auto & wall1 = GlassWall::FindInstance("#1");
+    auto & wall1 = GlassWall::FindInstance(0);
     wall1.Transformation(QMatrix3x3(trData1));
-    auto & wall2 = GlassWall::FindInstance("#2");
+    auto & wall2 = GlassWall::FindInstance(1);
     wall2.Transformation(QMatrix3x3(trData2));
     impl->wgt_WBOIT->update(); impl->wgt_CODB->update();
 }
