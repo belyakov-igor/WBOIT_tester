@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/Res">
+        <file>Eye.png</file>
+    </qresource>
+</RCC>

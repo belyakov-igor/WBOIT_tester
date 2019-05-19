@@ -6,16 +6,28 @@
 
 #include <QLayout>
 #include <QSlider>
+#include <QLabel>
 
 #include "GLWidget.h"
 #include "GlassWall.h"
 
 struct MainWindow::Impl
 {
-    Ui::MainWindow *ui = new Ui::MainWindow;
     ~Impl() { delete ui; }
+
+    Ui::MainWindow *ui = new Ui::MainWindow;
     GLWidget * wgt_WBOIT = nullptr, * wgt_CODB = nullptr;
+
+    QWidget * settingsBoard = nullptr;
+    QHBoxLayout * settingsBoardLayout = nullptr;
+
+    void ArrangeWallSettings();
 };
+
+void MainWindow::Impl::ArrangeWallSettings()
+{
+    assert(settingsBoard);
+}
 
 MainWindow::MainWindow(QWidget * parent) :
     QMainWindow(parent), impl(std::make_unique<Impl>())
@@ -25,12 +37,35 @@ MainWindow::MainWindow(QWidget * parent) :
     auto glay = new QGridLayout(centralWidget());
     centralWidget()->setLayout(glay);
 
+    impl->settingsBoard = new QWidget(this);
+    glay->addWidget(impl->settingsBoard, 0, 0, 1, 2);
+    {
+        auto hlay = new QHBoxLayout(impl->settingsBoard);
+        impl->settingsBoard->setLayout(hlay);
+        auto lbl = new QLabel(impl->settingsBoard);
+        hlay->addWidget(lbl);
+        lbl->setPixmap(QPixmap(":/Res/Eye.png"));
+        impl->settingsBoardLayout = new QHBoxLayout();
+        hlay->addLayout(impl->settingsBoardLayout);
+    }
+
+    auto lbl = new QLabel(QStringLiteral(
+                              "Weighted blended order-independent transparency"
+                                        ), this);
+    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
+    glay->addWidget(lbl, 1, 0);
     impl->wgt_WBOIT = new GLWidget(this);
-    glay->addWidget(impl->wgt_WBOIT, 0, 0);
+    glay->addWidget(impl->wgt_WBOIT, 2, 0);
+
+    lbl = new QLabel(QStringLiteral("Classic order-dependent blending"), this);
+    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
+    glay->addWidget(lbl, 1, 1);
     impl->wgt_CODB = new GLWidget(this);
-    glay->addWidget(impl->wgt_CODB, 0, 1);
+    glay->addWidget(impl->wgt_CODB, 2, 1);
+
+    glay->setRowStretch(2, 1);
     auto slider = new QSlider(Qt::Horizontal, this);
-    glay->addWidget(slider, 1, 0, 1, 2);
+    glay->addWidget(slider, 3, 0, 1, 2);
 
     static constexpr int max = 1000;
     slider->setRange(0, max);
@@ -77,7 +112,7 @@ void MainWindow::InitWalls() const
         }
     }
     {
-        static constexpr QVector2D a{-0.9f, -0.034f}, b{-0.9f, 0.04f}, c{0.0f, 0.0f};
+        static constexpr QVector2D a{-0.9f, -0.04f}, b{-0.9f, 0.04f}, c{0.0f, 0.0f};
         QColor clrs [] = { QColor(80, 150, 120), QColor(100, 130, 45), QColor(170, 100, 40),
                            QColor(40, 110, 145), QColor(140, 50, 50), QColor(50, 145, 145),
                            QColor(80, 65, 130), QColor(125, 30, 130) };
