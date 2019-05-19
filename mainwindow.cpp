@@ -7,6 +7,7 @@
 #include <QLayout>
 #include <QSlider>
 #include <QLabel>
+#include <QCheckBox>
 
 #include "GLWidget.h"
 #include "GlassWall.h"
@@ -22,12 +23,67 @@ struct MainWindow::Impl
     QHBoxLayout * settingsBoardLayout = nullptr;
 
     void ArrangeWallSettings();
+    void UpdateWidgets();
 };
 
 void MainWindow::Impl::ArrangeWallSettings()
 {
-    assert(settingsBoard);
+    assert(settingsBoard && settingsBoardLayout);
+    std::vector<QObject *> objs;
+    for (auto obj : settingsBoard->children()) objs.push_back(obj);
+    for (auto obj : objs)
+        if (!obj->metaObject()->inherits(&QLayout::staticMetaObject))
+            delete obj;
+
+    std::vector<QWidget *> settingsWidgets;
+    settingsWidgets.reserve(GlassWall::CountOfInstances());
+    auto & iter = GlassWallIterator::Instance();
+    for (iter.Reset(); !iter.AtEnd(); ++iter)
+    {
+        auto wgt = settingsWidgets.emplace_back(new QWidget(settingsBoard));
+        auto glay = new QGridLayout(wgt); wgt->setLayout(glay);
+
+        auto blackWall = new QLabel(wgt);
+        glay->addWidget(blackWall, 0, 0, 5, 1);
+        auto pmap = QPixmap(2, 200); pmap.fill(Qt::black);
+        blackWall->setPixmap(std::move(pmap));
+
+        auto lbl = new QLabel( QString(QStringLiteral("Depth level %1"))
+                               .arg(iter->DepthLevel())                 , wgt );
+        glay->addWidget(lbl, 0, 1, Qt::AlignHCenter);
+
+        auto vcbx = new QCheckBox(QStringLiteral("Visible"), wgt);
+        glay->addWidget(vcbx, 1, 1);
+        vcbx->setChecked(iter->Visible());
+        connect( vcbx, &QCheckBox::toggled, wgt,
+                 [&wall = *iter, this](bool checked)
+                 { wall.Visible(checked); UpdateWidgets(); } );
+
+        auto tcbx = new QCheckBox(QStringLiteral("Transparent"), wgt);
+        glay->addWidget(tcbx, 2, 1);
+        tcbx->setChecked(iter->Transparent());
+        connect( tcbx, &QCheckBox::toggled, wgt,
+                 [&wall = *iter, this](bool checked)
+                 { wall.Transparent(checked); UpdateWidgets(); } );
+
+        auto olbl = new QLabel(QStringLiteral("Opacity:"), wgt);
+        glay->addWidget(olbl, 3, 1);
+
+        auto oslider = new QSlider(Qt::Orientation::Horizontal, wgt);
+        glay->addWidget(oslider, 4, 1);
+        static constexpr int smax = 1000;
+        oslider->setRange(0, smax);
+        oslider->setValue(static_cast<int>(iter->Opacity() * smax));
+        connect( oslider, &QSlider::valueChanged, wgt,
+                 [&wall = *iter, this](int value)
+                 { wall.Opacity(static_cast<float>(value) / smax); UpdateWidgets(); } );
+    }
+
+    for (auto it = settingsWidgets.rbegin(); it != settingsWidgets.rend(); ++it)
+        settingsBoardLayout->addWidget(*it);
 }
+
+void MainWindow::Impl::UpdateWidgets() { wgt_WBOIT->update(); wgt_CODB->update(); }
 
 MainWindow::MainWindow(QWidget * parent) :
     QMainWindow(parent), impl(std::make_unique<Impl>())
@@ -37,16 +93,18 @@ MainWindow::MainWindow(QWidget * parent) :
     auto glay = new QGridLayout(centralWidget());
     centralWidget()->setLayout(glay);
 
-    impl->settingsBoard = new QWidget(this);
-    glay->addWidget(impl->settingsBoard, 0, 0, 1, 2);
+    auto sbparent = new QWidget(this);
+    glay->addWidget(sbparent, 0, 0, 1, 2);
     {
-        auto hlay = new QHBoxLayout(impl->settingsBoard);
-        impl->settingsBoard->setLayout(hlay);
-        auto lbl = new QLabel(impl->settingsBoard);
+        auto hlay = new QHBoxLayout(sbparent);
+        sbparent->setLayout(hlay);
+        auto lbl = new QLabel(sbparent);
         hlay->addWidget(lbl);
         lbl->setPixmap(QPixmap(":/Res/Eye.png"));
-        impl->settingsBoardLayout = new QHBoxLayout();
-        hlay->addLayout(impl->settingsBoardLayout);
+        impl->settingsBoard = new QWidget(sbparent);
+        hlay->addWidget(impl->settingsBoard);
+        impl->settingsBoardLayout = new QHBoxLayout(impl->settingsBoard);
+        impl->settingsBoard->setLayout(impl->settingsBoardLayout);
     }
 
     auto lbl = new QLabel(QStringLiteral(
@@ -101,8 +159,8 @@ void MainWindow::InitWalls() const
         static const QMatrix2x2 rot(rotdata);
         QMatrix2x2 rot_t{};
 
-        auto & wall1 = GlassWall::MakeInstance(0, 0.5f, true);
-        auto & wall2 = GlassWall::MakeInstance(1, 0.5f, true);
+        auto & wall1 = GlassWall::MakeInstance(0, 0.5f, true, true);
+        auto & wall2 = GlassWall::MakeInstance(1, 0.5f, true, true);
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
@@ -124,7 +182,7 @@ void MainWindow::InitWalls() const
         static const QMatrix2x2 rot(rotdata);
         QMatrix2x2 rot_t{};
 
-        auto & wall1 = GlassWall::MakeInstance(2, 0.5f, true);
+        auto & wall1 = GlassWall::MakeInstance(2, 0.5f, true, true);
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
@@ -143,13 +201,14 @@ void MainWindow::InitWalls() const
         static const QMatrix2x2 rot(rotdata);
         QMatrix2x2 rot_t{};
 
-        auto & wall1 = GlassWall::MakeInstance(3, 0.5f, true);
+        auto & wall1 = GlassWall::MakeInstance(3, 0.5f, true, true);
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
                                clrs[i], clrs[i]                                );
         }
     }
+    impl->ArrangeWallSettings();
 }
 
 void MainWindow::UpdateWalls(float p) const
@@ -172,5 +231,5 @@ void MainWindow::UpdateWalls(float p) const
     wall2.Transformation(QMatrix3x3(trData2));
     auto & wall3 = GlassWall::FindInstance(2);
     wall3.Transformation(QMatrix3x3(trData3));
-    impl->wgt_WBOIT->update(); impl->wgt_CODB->update();
+    impl->UpdateWidgets();
 }

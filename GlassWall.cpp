@@ -8,13 +8,14 @@
 
 struct GlassWall::Impl
 {
-    explicit Impl(int depthLevel, float opacity, bool transparent)
-        : m_depthLevel(depthLevel), m_opacity(opacity), m_transparent(transparent)
+    explicit Impl(int depthLevel, float opacity, bool transparent, bool visible)
+        : m_depthLevel(depthLevel), m_opacity(opacity)
+        , m_transparent(transparent), m_visible(visible)
     {
         if (opacity < 0 || opacity > 1) throw GlassWallException_CantConstruct();
         UpdateDepthsOnConctruction();
     }
-    int m_depthLevel; float m_opacity; bool m_transparent;
+    int m_depthLevel; float m_opacity; bool m_transparent; bool m_visible;
     QMatrix3x3 m_transformation;
 
     static void UpdateDepths();
@@ -40,6 +41,8 @@ struct GlassWall::Impl
     void  Opacity(float opacity)       { m_opacity = opacity; }
     bool Transparent(                ) const { return m_transparent;        }
     void Transparent(bool transparent)       { m_transparent = transparent; }
+    bool Visible(            ) const { return m_visible;    }
+    void Visible(bool visible)       { m_visible = visible; }
     QMatrix3x3 Transformation(            ) const { return m_transformation;         }
     void       Transformation(QMatrix3x3 t)       { m_transformation = std::move(t); }
 
@@ -50,8 +53,8 @@ struct GlassWall::Impl
     void DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
 };
 
-GlassWall::GlassWall(int depthLevel, float opacity, bool transparent)
-    : impl(std::make_unique<Impl>(depthLevel, opacity, transparent)) {}
+GlassWall::GlassWall(int depthLevel, float opacity, bool transparent, bool visible)
+    : impl(std::make_unique<Impl>(depthLevel, opacity, transparent, visible)) {}
 
 static std::map<int, std::unique_ptr<GlassWall>> g_gwalls;
 // iterate from far to near
@@ -235,7 +238,7 @@ struct GlassWall_DrawNonTransparent_GLProgram {
 
 void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
-    if (m_vertices.empty()) return;
+    if (!m_visible || m_vertices.empty()) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
@@ -338,7 +341,7 @@ struct GlassWall_DrawTransparent_GLProgram {
 
 void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
-    if (m_vertices.empty() || !m_transparent) return;
+    if (!m_visible || m_vertices.empty() || !m_transparent) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
@@ -365,13 +368,15 @@ void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & pr
 
 
 
-GlassWall & GlassWall::MakeInstance(int depthLevel, float opacity, bool transparent)
+GlassWall & GlassWall::MakeInstance( int depthLevel, float opacity,
+                                     bool transparent, bool visible )
 {
     auto hint = g_gwalls.find(depthLevel);
     if (hint != g_gwalls.end()) throw GlassWallException_CantInsert();
     auto iter = g_gwalls.insert(hint, std::pair{ depthLevel,
                                                  std::unique_ptr<GlassWall>(
-                                         new GlassWall(depthLevel, opacity, transparent)
+                                         new GlassWall( depthLevel, opacity,
+                                                        transparent, visible )
                                                                            )
                                                }
                                );
@@ -385,6 +390,8 @@ GlassWall & GlassWall::FindInstance(int depthLevel)
     return *it->second;
 }
 
+size_t GlassWall::CountOfInstances() { return g_gwalls.size(); }
+
 int  GlassWall::DepthLevel(       ) const { return impl->DepthLevel(); }
 void GlassWall::DepthLevel(int lvl)       { impl->DepthLevel(lvl);     }
 
@@ -392,6 +399,8 @@ float GlassWall::Opacity(             ) const { return impl->Opacity(); }
 void  GlassWall::Opacity(float opacity)       { impl->Opacity(opacity); }
 bool GlassWall::Transparent(                ) const { return impl->Transparent();     }
 void GlassWall::Transparent(bool transparent)       { impl->Transparent(transparent); }
+bool GlassWall::Visible(            ) const { return impl->Visible(); }
+void GlassWall::Visible(bool visible)       { impl->Visible(visible); }
 
 QMatrix3x3 GlassWall::Transformation(            ) const
 { return impl->Transformation(); }

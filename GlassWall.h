@@ -16,7 +16,7 @@ class GLResourceAllocator;
 
 class GlassWall
 {
-    explicit GlassWall(int depthLevel, float opacity, bool transparent);
+    explicit GlassWall(int depthLevel, float opacity, bool transparent, bool visible);
 public:
     struct GlassWallException_CantInsert : std::exception
     { const char * what() const noexcept override
@@ -31,8 +31,10 @@ public:
       { return "Opacity must be in [0, 1] range. Can't construct"; }
     };
 
-    static GlassWall & MakeInstance(int depthLevel, float opacity, bool transparent);
+    static GlassWall & MakeInstance( int depthLevel, float opacity,
+                                     bool transparent, bool visible );
     static GlassWall & FindInstance(int depthLevel);
+    static size_t CountOfInstances();
 
     ~GlassWall() = default;
     GlassWall(const GlassWall & ) = delete;
@@ -46,6 +48,8 @@ public:
     void  Opacity(float opacity);
     bool Transparent(                ) const;
     void Transparent(bool transparent);
+    bool Visible(            ) const;
+    void Visible(bool visible);
     QMatrix3x3 Transformation(            ) const;
     void       Transformation(QMatrix3x3 t);
 
