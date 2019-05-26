@@ -18,6 +18,11 @@ GLWidgetSignalEmitter & GLWidgetSignalEmitter::Instance()
 
 struct GLWidget::Impl
 {
+    explicit Impl(TransparentRenderStrategyEnum s)
+        : trs( (s == TransparentRenderStrategyEnum::WBOIT)
+               ? std::make_unique<WBOITRenderStrategy>(*this)
+               : nullptr                                      ) {}
+
     std::unordered_set<GLuint> vaos;
 
     int width = 0, height = 0;
@@ -25,33 +30,105 @@ struct GLWidget::Impl
 
     static OpenGLFunctions * GLFunctions();
 
-    // Transparent drawing ===============================================
-    GLuint Tframebuffer1      = 0; // Render
-    GLuint TColorTexture1     = 0; // non-transparent
-    GLuint TDepthRenderbuffer = 0; // objects here
+    // Non-transparent drawing ===============================================
+    GLuint NTframebuffer     = 0; // Render
+    GLuint NTColorTexture    = 0; // non-transparent
+    GLuint DepthRenderbuffer = 0; // objects here
 
-    GLuint Tframebuffer2  = 0; // Render
-    GLuint TColorTexture2 = 0; // transparent
-    GLuint TAlphaTexture2 = 0; // objects here
+    void GenGLResources();
+    void DeleteGLResources();
 
-    void InitializeTFramebuffers();
-    void AllocateTTextures(int w, int h);
-    void AllocateTTextures();
-    void SetupTTextureProgram();
-    void CleanupAfterTTextureRendering();
-    void ApplyTTextures();
+    void ReallocateFramebufferStorages(int w, int h);
+    void ReallocateFramebufferStorages() { ReallocateFramebufferStorages(width, height); }
 
-    void paintGL_FirstRenderingPass();
-    void paintGL_SecondRenderingPass();
-    void paintGL_ThirdRenderingPass(GLuint defaultFBO);
-    // /Transparent drawing ==============================================
+    void RenderNonTransparent() const;
+    // /Non-transparent drawing ==============================================
+
+    // Transparent drawing ===================================================
+    struct TransparentRenderStrategy
+    {
+        explicit TransparentRenderStrategy(Impl & impl_) : impl(impl_) {}
+        virtual ~TransparentRenderStrategy() = default;
+
+        virtual void GenGLResources() = 0;
+        virtual void DeleteGLResources() = 0;
+        virtual void Render(GLuint defaultFBO) const = 0;
+
+        virtual void ReallocateFramebufferStorages(int w, int h) = 0;
+        void ReallocateFramebufferStorages()
+        { ReallocateFramebufferStorages(impl.width, impl.height); }
+    protected:
+        Impl & impl;
+    };
+    std::unique_ptr<TransparentRenderStrategy> trs;
+
+    struct WBOITRenderStrategy : TransparentRenderStrategy
+    {
+        explicit WBOITRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
+
+        GLuint framebuffer  = 0; // Render
+        GLuint ColorTexture = 0; // transparent
+        GLuint AlphaTexture = 0; // objects here
+
+        void GenGLResources() override;
+        void DeleteGLResources() override;
+        void ReallocateFramebufferStorages(int w, int h) override;
+        void Render(GLuint defaultFBO) const override;
+
+        void PrepareToTransparentRendering() const;
+        void CleanupAfterTransparentRendering() const;
+        void ApplyTextures() const;
+    };
+    // /Transparent drawing ==================================================
 };
 
+void GLWidget::Impl::GenGLResources()
+{
+    auto f = GLFunctions();
+    f->glGenFramebuffers (1, &NTframebuffer);
+    f->glGenTextures     (1, &NTColorTexture);
+    f->glGenRenderbuffers(1, &DepthRenderbuffer);
+
+    ReallocateFramebufferStorages(1, 1);
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, NTframebuffer);
+    f->glFramebufferTexture2D(
+            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D_MULTISAMPLE, NTColorTexture, 0
+                             );
+    f->glFramebufferRenderbuffer(
+                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                GL_RENDERBUFFER, DepthRenderbuffer
+                                );
+}
+
+void GLWidget::Impl::DeleteGLResources()
+{
+    auto f = GLFunctions();
+
+    f->glDeleteFramebuffers (1, &NTframebuffer);
+    f->glDeleteTextures     (1, &NTColorTexture);
+    f->glDeleteRenderbuffers(1, &DepthRenderbuffer);
+}
+
+void GLWidget::Impl::ReallocateFramebufferStorages(int w, int h)
+{
+    auto f = GLFunctions();
+
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, NTColorTexture);
+    f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
+                                GL_RGB16F, w, h, GL_TRUE                 );
+    f->glBindRenderbuffer(GL_RENDERBUFFER, DepthRenderbuffer);
+    f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
+                                         GL_DEPTH_COMPONENT, w, h        );
+}
 
 
 
-GLWidget::GLWidget(QWidget * parent)
-    : QOpenGLWidget(parent), impl(std::make_unique<Impl>())
+
+
+GLWidget::GLWidget(TransparentRenderStrategyEnum strategy, QWidget * parent)
+    : QOpenGLWidget(parent), impl(std::make_unique<Impl>(strategy))
 {
     QSurfaceFormat format;
     format.setSamples(numOfSamples);
@@ -69,13 +146,8 @@ GLWidget::~GLWidget()
 
     auto f = Impl::GLFunctions();
 
-    //transparent drawing
-    f->glDeleteFramebuffers (1, &impl->Tframebuffer1);
-    f->glDeleteTextures     (1, &impl->TColorTexture1);
-    f->glDeleteRenderbuffers(1, &impl->TDepthRenderbuffer);
-    f->glDeleteFramebuffers (1, &impl->Tframebuffer2);
-    f->glDeleteTextures     (1, &impl->TColorTexture2);
-    f->glDeleteTextures     (1, &impl->TAlphaTexture2);
+    impl->DeleteGLResources();
+    impl->trs->DeleteGLResources();
 
     for (auto vao : impl->vaos)
     {
@@ -97,14 +169,8 @@ void GLWidget::initializeGL()
     auto f = Impl::GLFunctions();
     f->glMinSampleShading(1.0f);
 
-    //transparent drawing
-    f->glGenFramebuffers (1, &impl->Tframebuffer1);
-    f->glGenTextures     (1, &impl->TColorTexture1);
-    f->glGenRenderbuffers(1, &impl->TDepthRenderbuffer);
-    f->glGenFramebuffers (1, &impl->Tframebuffer2);
-    f->glGenTextures     (1, &impl->TColorTexture2);
-    f->glGenTextures     (1, &impl->TAlphaTexture2);
-    impl->InitializeTFramebuffers();
+    impl->GenGLResources();
+    impl->trs->GenGLResources();
 }
 
 void GLWidget::resizeGL(int width, int height)
@@ -125,35 +191,31 @@ void GLWidget::resizeGL(int width, int height)
 
     std::copy(matdata, matdata + 9, impl->projMat.data());
 
-    impl->AllocateTTextures();
+    impl->ReallocateFramebufferStorages();
+    impl->trs->ReallocateFramebufferStorages();
 }
 
 
-OpenGLFunctions *GLWidget::Impl::GLFunctions()
-{
-    return QOpenGLContext::currentContext()->
-            versionFunctions<OpenGLFunctions>();
-}
+OpenGLFunctions * GLWidget::Impl::GLFunctions()
+{ return QOpenGLContext::currentContext()->versionFunctions<OpenGLFunctions>(); }
 
 void GLWidget::paintGL()
 {
     auto f = Impl::GLFunctions();
 
-    impl->paintGL_FirstRenderingPass();
+    impl->RenderNonTransparent();
     f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-    impl->paintGL_SecondRenderingPass();
-    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-    impl->paintGL_ThirdRenderingPass(defaultFramebufferObject());
+    impl->trs->Render(defaultFramebufferObject());
 }
 
-void GLWidget::Impl::paintGL_FirstRenderingPass()
+void GLWidget::Impl::RenderNonTransparent() const
 {
     auto f = GLFunctions();
 
     GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     static constexpr GLfloat clearDepth = 1.0f;
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, Tframebuffer1);
+    f->glBindFramebuffer(GL_FRAMEBUFFER, NTframebuffer);
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
     f->glClearBufferfv(GL_DEPTH, 0, &clearDepth);
 
@@ -161,91 +223,86 @@ void GLWidget::Impl::paintGL_FirstRenderingPass()
     for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawNonTransparent(f, projMat);
 }
 
-void GLWidget::Impl::paintGL_SecondRenderingPass()
+void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
 {
-    auto f = GLFunctions();
-
     static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     static constexpr GLfloat clearAlpha = 1.0f;
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, Tframebuffer2);
+    auto f = GLFunctions();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
     f->glClearBufferfv(GL_COLOR, 1, &clearAlpha);
-    SetupTTextureProgram();
+    PrepareToTransparentRendering();
 
     auto & iter = GlassWallIterator::Instance();
-    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawTransparent(f, projMat);
+    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawTransparent(f, impl.projMat);
 
-    CleanupAfterTTextureRendering();
-}
+    CleanupAfterTransparentRendering();
 
-void GLWidget::Impl::paintGL_ThirdRenderingPass(GLuint defaultFBO)
-{
-    auto f = GLFunctions();
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
 
-    ApplyTTextures();
+    ApplyTextures();
 }
 
-
-void GLWidget::Impl::InitializeTFramebuffers()
+void GLWidget::Impl::WBOITRenderStrategy::GenGLResources()
 {
-    AllocateTTextures(1, 1);
-
     auto f = GLFunctions();
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, Tframebuffer1);
-    f->glFramebufferTexture2D(
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE, TColorTexture1, 0
-                             );
-    f->glFramebufferRenderbuffer(
-                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, TDepthRenderbuffer
-                                );
+    f->glGenFramebuffers (1, &framebuffer);
+    f->glGenTextures     (1, &ColorTexture);
+    f->glGenTextures     (1, &AlphaTexture);
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, Tframebuffer2);
+    ReallocateFramebufferStorages(1, 1);
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     f->glFramebufferTexture2D(
             GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE,  TColorTexture2, 0
+            GL_TEXTURE_2D_MULTISAMPLE,  ColorTexture, 0
                              );
     f->glFramebufferTexture2D(
             GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-            GL_TEXTURE_2D_MULTISAMPLE,  TAlphaTexture2, 0
+            GL_TEXTURE_2D_MULTISAMPLE,  AlphaTexture, 0
                              );
     GLenum attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
     f->glDrawBuffers(2, attachments);
     f->glFramebufferRenderbuffer(
                 GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, TDepthRenderbuffer
+                GL_RENDERBUFFER, impl.DepthRenderbuffer
                                 );
 }
 
-void GLWidget::Impl::AllocateTTextures(int w, int h)
+void GLWidget::Impl::WBOITRenderStrategy::DeleteGLResources()
+{
+    auto f = GLFunctions();
+    f->glDeleteFramebuffers (1, &framebuffer);
+    f->glDeleteTextures     (1, &ColorTexture);
+    f->glDeleteTextures     (1, &AlphaTexture);
+}
+
+void GLWidget::Impl::WBOITRenderStrategy::ReallocateFramebufferStorages(int w, int h)
 {
     auto f = GLFunctions();
 
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TColorTexture1);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, impl.NTColorTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_RGB16F, w, h, GL_TRUE                 );
-    f->glBindRenderbuffer(GL_RENDERBUFFER, TDepthRenderbuffer);
+    f->glBindRenderbuffer(GL_RENDERBUFFER, impl.DepthRenderbuffer);
     f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
                                          GL_DEPTH_COMPONENT, w, h        );
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TColorTexture2);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ColorTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_RGBA16F, w, h, GL_TRUE                );
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TAlphaTexture2);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, AlphaTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_R16F, w, h, GL_TRUE                   );
 }
 
-void GLWidget::Impl::AllocateTTextures()
-{ AllocateTTextures(width, height); }
 
 
-
-void GLWidget::Impl::SetupTTextureProgram()
+void GLWidget::Impl::WBOITRenderStrategy::PrepareToTransparentRendering() const
 {
     auto f = GLFunctions();
     f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE);
@@ -264,7 +321,7 @@ void GLWidget::Impl::SetupTTextureProgram()
     f->glEnable(GL_MULTISAMPLE);
 }
 
-void GLWidget::Impl::CleanupAfterTTextureRendering()
+void GLWidget::Impl::WBOITRenderStrategy::CleanupAfterTransparentRendering() const
 {
     auto f = GLFunctions();
     f->glDepthMask(GL_TRUE);
@@ -316,7 +373,7 @@ struct ApplyTTexturesGLResources {
     }
 };
 
-void GLWidget::Impl::ApplyTTextures()
+void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
 {
     auto f = GLFunctions();
     static ApplyTTexturesGLResources res;
@@ -324,13 +381,13 @@ void GLWidget::Impl::ApplyTTextures()
     if (!res.program.bind()) assert(false);
 
     f->glActiveTexture(GL_TEXTURE0);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TColorTexture1);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, impl.NTColorTexture);
     f->glUniform1i(0, 0);
     f->glActiveTexture(GL_TEXTURE1);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TColorTexture2);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ColorTexture);
     f->glUniform1i(1, 1);
     f->glActiveTexture(GL_TEXTURE2);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, TAlphaTexture2);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, AlphaTexture);
     f->glUniform1i(2, 2);
 
     f->glEnable(GL_MULTISAMPLE); f->glDisable(GL_DEPTH_TEST);

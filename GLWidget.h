@@ -12,7 +12,8 @@ class GLWidget : public QOpenGLWidget
 {
     Q_OBJECT
 public:
-    explicit GLWidget(QWidget * parent);
+    enum class TransparentRenderStrategyEnum { WBOIT, CODB };
+    explicit GLWidget(TransparentRenderStrategyEnum strategy, QWidget * parent);
     ~GLWidget() override;
 
     [[nodiscard]] GLuint GenVAO();
