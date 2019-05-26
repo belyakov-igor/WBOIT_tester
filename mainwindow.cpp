@@ -56,14 +56,14 @@ void MainWindow::Impl::ArrangeWallSettings()
         glay->addWidget(vcbx, 1, 1);
         vcbx->setChecked(iter->Visible());
         connect( vcbx, &QCheckBox::toggled, wgt,
-                 [&wall = *iter, this](bool checked)
+                 [&wall = *iter, this](bool checked)//clazy:exclude=lambda-in-connect
                  { wall.Visible(checked); UpdateWidgets(); } );
 
         auto tcbx = new QCheckBox(QStringLiteral("Transparent"), wgt);
         glay->addWidget(tcbx, 2, 1);
         tcbx->setChecked(iter->Transparent());
         connect( tcbx, &QCheckBox::toggled, wgt,
-                 [&wall = *iter, this](bool checked)
+                 [&wall = *iter, this](bool checked)//clazy:exclude=lambda-in-connect
                  { wall.Transparent(checked); UpdateWidgets(); } );
 
         auto olbl = new QLabel(QStringLiteral("Opacity:"), wgt);
@@ -75,7 +75,7 @@ void MainWindow::Impl::ArrangeWallSettings()
         oslider->setRange(0, smax);
         oslider->setValue(static_cast<int>(iter->Opacity() * smax));
         connect( oslider, &QSlider::valueChanged, wgt,
-                 [&wall = *iter, this](int value)
+                 [&wall = *iter, this](int value)//clazy:exclude=lambda-in-connect
                  { wall.Opacity(static_cast<float>(value) / smax); UpdateWidgets(); } );
     }
 

@@ -76,8 +76,10 @@ struct GLWidget::Impl
     {
         explicit CODBRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
 
-        void GenGLResources() override {}
-        void DeleteGLResources() override {}
+        GLuint dummyFramebuffer = 0;
+
+        void GenGLResources() override;
+        void DeleteGLResources() override;
         void ReallocateFramebufferStorages(int, int) override {}
         void Render(GLuint defaultFBO) const override;
 
@@ -369,10 +371,19 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
 
 
 
+void GLWidget::Impl::CODBRenderStrategy::GenGLResources()
+{ auto f = GLFunctions(); f->glGenFramebuffers (1, &dummyFramebuffer); }
+
+void GLWidget::Impl::CODBRenderStrategy::DeleteGLResources()
+{auto f = GLFunctions(); f->glDeleteFramebuffers (1, &dummyFramebuffer);}
+
 void GLWidget::Impl::CODBRenderStrategy::Render(GLuint defaultFBO) const
 {
     auto f = GLFunctions();
 
+    f->glBindFramebuffer(GL_FRAMEBUFFER, dummyFramebuffer); /* Anti-aliasing doesn't work
+        if you don't switch framebuffers here, hell if I know why. And this is the only
+        reason to have dummyFramebuffer in CODBRenderStrategy struct. */
     f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     impl.RenderNonTransparent();
 
