@@ -49,8 +49,9 @@ struct GlassWall::Impl
     void AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                       QColor edgeColor, QColor fillColor     );
 
-    void DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat);
-    void DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawNonTransparent     (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForCODB (OpenGLFunctions * f, const QMatrix3x3 & projMat);
 };
 
 GlassWall::GlassWall(int depthLevel, float opacity, bool transparent, bool visible)
@@ -271,9 +272,9 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 &
     f->glBindVertexArray(0);
 }
 
-struct GlassWall_DrawTransparent_GLProgram {
+struct GlassWall_DrawTransparentForWBOIT_GLProgram {
     QOpenGLShaderProgram p;
-    explicit GlassWall_DrawTransparent_GLProgram()
+    explicit GlassWall_DrawTransparentForWBOIT_GLProgram()
     {
         if (!p.addShaderFromSourceCode(
                     QOpenGLShader::Vertex,
@@ -296,56 +297,133 @@ struct GlassWall_DrawTransparent_GLProgram {
            ) assert(false);
         if (!p.addShaderFromSourceCode(
                     QOpenGLShader::Geometry,
-                    "#version 430 core                              \n"
-                    "layout (triangles) in;                         \n"
-                    "layout (triangle_strip, max_vertices = 3) out; \n"
-                    "                                               \n"
-                    "in float colorComponent[];                     \n"
-                    "out vec3 color;                                \n"
-                    "                                               \n"
-                    "void main()                                    \n"
-                    "{                                              \n"
-                    "    color = vec3( colorComponent[0],           \n"
-                    "                  colorComponent[1],           \n"
-                    "                  colorComponent[2]  );        \n"
-                    "                                               \n"
-                    "    gl_Position = gl_in[0].gl_Position;        \n"
-                    "    EmitVertex();                              \n"
-                    "    gl_Position = gl_in[1].gl_Position;        \n"
-                    "    EmitVertex();                              \n"
-                    "    gl_Position = gl_in[2].gl_Position;        \n"
-                    "    EmitVertex(); EndPrimitive();              \n"
-                    "}                                              \n"
+                    "#version 430 core                                                     \n"
+                    "layout (triangles) in;                                                \n"
+                    "layout (triangle_strip, max_vertices = 3) out;                        \n"
+                    "                                                                      \n"
+                    "in float colorComponent[];                                            \n"
+                    "out vec3 color;                                                       \n"
+                    "                                                                      \n"
+                    "void main()                                                           \n"
+                    "{                                                                     \n"
+                    "    color = vec3(                                                     \n"
+                    "        colorComponent[0], colorComponent[1], colorComponent[2]       \n"
+                    "                );                                                    \n"
+                    "                                                                      \n"
+                    "    gl_Position = gl_in[0].gl_Position; EmitVertex();                 \n"
+                    "    gl_Position = gl_in[1].gl_Position; EmitVertex();                 \n"
+                    "    gl_Position = gl_in[2].gl_Position; EmitVertex(); EndPrimitive(); \n"
+                    "}                                                                     \n"
                                       )
            ) assert(false);
         if (!p.addShaderFromSourceCode(
                     QOpenGLShader::Fragment,
-                    "#version 430                               \n"
-                    "                                           \n"
-                    "in vec3 color;                             \n"
-                    "                                           \n"
-                    "layout (location = 0) out vec4 outData;    \n"
-                    "layout (location = 1) out float alpha;     \n"
-                    "                                           \n"
-                    "layout (location = 2) uniform float w;     \n"
-                    "void main()                                \n"
-                    "{                                          \n"
-                    "    outData = vec4(w * color, w);          \n"
-                    "    alpha = 1 - w;                         \n"
-                    "}                                          \n"
+                    "#version 430                                                 \n"
+                    "                                                             \n"
+                    "in vec3 color;                                               \n"
+                    "                                                             \n"
+                    "layout (location = 0) out vec4 outData;                      \n"
+                    "layout (location = 1) out float alpha;                       \n"
+                    "                                                             \n"
+                    "layout (location = 2) uniform float w;                       \n"
+                    "void main() { outData = vec4(w * color, w); alpha = 1 - w; } \n"
                                       )
            ) assert(false);
         if (!p.link()) assert(false);
     }
 };
 
-void GlassWall::Impl::DrawTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+void GlassWall::Impl::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat)
 {
     if (!m_visible || m_vertices.empty() || !m_transparent) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
-    static GlassWall_DrawTransparent_GLProgram program;
+    static GlassWall_DrawTransparentForWBOIT_GLProgram program;
+    assert (program.p.isLinked());
+    if (!program.p.bind()) assert(false);
+
+    f->glUniform1f(0, MyDepth());
+    f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
+    f->glUniform1f(2, m_opacity);
+
+    auto [vao, ready] = m_vaoHolder.GetVAO();
+    f->glBindVertexArray(vao);
+    if (!m_vbo->bind()) assert(false);
+    if (!ready) SetupVAO(vao, f);
+
+    f->glEnable(GL_DEPTH_TEST);
+    f->glEnable(GL_MULTISAMPLE);
+    f->glDepthFunc(GL_LEQUAL);
+    f->glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
+}
+
+struct GlassWall_DrawTransparentForCODB_GLProgram {
+    QOpenGLShaderProgram p;
+    explicit GlassWall_DrawTransparentForCODB_GLProgram()
+    {
+        if (!p.addShaderFromSourceCode(
+                    QOpenGLShader::Vertex,
+                    "#version 430                                                 \n"
+                    "layout (location = 0) in vec2 vertex;                        \n"
+                    "layout (location = 1) in uint edgeColorComponent;            \n"
+                    "layout (location = 2) in uint fillColorComponent;            \n"
+                    "                                                             \n"
+                    "layout (location = 0) uniform float d;                       \n"
+                    "layout (location = 1) uniform mat3 tr;                       \n"
+                    "                                                             \n"
+                    "out float colorComponent;                                    \n"
+                    "                                                             \n"
+                    "void main()                                                  \n"
+                    "{                                                            \n"
+                    "    gl_Position = vec4(tr * vec3(vertex, d), 1);             \n"
+                    "    colorComponent = float(fillColorComponent) / 255;        \n"
+                    "}                                                            \n"
+                                      )
+           ) assert(false);
+        if (!p.addShaderFromSourceCode(
+                    QOpenGLShader::Geometry,
+                    "#version 430 core                                                     \n"
+                    "layout (triangles) in;                                                \n"
+                    "layout (triangle_strip, max_vertices = 3) out;                        \n"
+                    "                                                                      \n"
+                    "in float colorComponent[];                                            \n"
+                    "out vec3 color;                                                       \n"
+                    "                                                                      \n"
+                    "void main()                                                           \n"
+                    "{                                                                     \n"
+                    "    color = vec3(                                                     \n"
+                    "        colorComponent[0], colorComponent[1], colorComponent[2]       \n"
+                    "                );                                                    \n"
+                    "                                                                      \n"
+                    "    gl_Position = gl_in[0].gl_Position; EmitVertex();                 \n"
+                    "    gl_Position = gl_in[1].gl_Position; EmitVertex();                 \n"
+                    "    gl_Position = gl_in[2].gl_Position; EmitVertex(); EndPrimitive(); \n"
+                    "}                                                                     \n"
+                                      )
+           ) assert(false);
+        if (!p.addShaderFromSourceCode(
+                    QOpenGLShader::Fragment,
+                    "#version 430                                    \n"
+                    "                                                \n"
+                    "in vec3 color;                                  \n"
+                    "out vec4 colorAndAlpha;                         \n"
+                    "layout (location = 2) uniform float w;          \n"
+                    "                                                \n"
+                    "void main() { colorAndAlpha = vec4(color, w); } \n"
+                                      )
+           ) assert(false);
+        if (!p.link()) assert(false);
+    }
+};
+
+void GlassWall::Impl::DrawTransparentForCODB(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{
+    if (!m_visible || m_vertices.empty() || !m_transparent) return;
+    if (m_vboNeedsToBeCreated) CreateVBO();
+    if (m_vboNeedsToBeReallocated) ReallocateVBO();
+
+    static GlassWall_DrawTransparentForCODB_GLProgram program;
     assert (program.p.isLinked());
     if (!program.p.bind()) assert(false);
 
@@ -412,11 +490,14 @@ void GlassWall::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                              QColor edgeColor, QColor fillColor     )
 { impl->AddTriangle(a, b, c, edgeColor, fillColor); }
 
-void GlassWall::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{ impl->DrawNonTransparent(f, projMat); }
+void GlassWall::DrawNonTransparent     (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawNonTransparent     (f, projMat); }
 
-void GlassWall::DrawTransparent   (OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{ impl->DrawTransparent   (f, projMat); }
+void GlassWall::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparentForWBOIT(f, projMat); }
+
+void GlassWall::DrawTransparentForCODB (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparentForCODB (f, projMat); }
 
 GlassWallIterator & GlassWallIterator::Instance() { static GlassWallIterator ins; return ins; }
 

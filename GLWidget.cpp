@@ -19,9 +19,14 @@ GLWidgetSignalEmitter & GLWidgetSignalEmitter::Instance()
 struct GLWidget::Impl
 {
     explicit Impl(TransparentRenderStrategyEnum s)
-        : trs( (s == TransparentRenderStrategyEnum::WBOIT)
-               ? std::make_unique<WBOITRenderStrategy>(*this)
-               : nullptr                                      ) {}
+        : trs(    s == TransparentRenderStrategyEnum::WBOIT
+                  ? std::unique_ptr<TransparentRenderStrategy>(
+                        std::make_unique<WBOITRenderStrategy>(*this)
+                                                              )
+                  : std::unique_ptr<TransparentRenderStrategy>(
+                        std::make_unique< CODBRenderStrategy>(*this)
+                                                              )
+             ){}
 
     std::unordered_set<GLuint> vaos;
 
@@ -30,19 +35,7 @@ struct GLWidget::Impl
 
     static OpenGLFunctions * GLFunctions();
 
-    // Non-transparent drawing ===============================================
-    GLuint NTframebuffer     = 0; // Render
-    GLuint NTColorTexture    = 0; // non-transparent
-    GLuint DepthRenderbuffer = 0; // objects here
-
-    void GenGLResources();
-    void DeleteGLResources();
-
-    void ReallocateFramebufferStorages(int w, int h);
-    void ReallocateFramebufferStorages() { ReallocateFramebufferStorages(width, height); }
-
     void RenderNonTransparent() const;
-    // /Non-transparent drawing ==============================================
 
     // Transparent drawing ===================================================
     struct TransparentRenderStrategy
@@ -66,9 +59,8 @@ struct GLWidget::Impl
     {
         explicit WBOITRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
 
-        GLuint framebuffer  = 0; // Render
-        GLuint ColorTexture = 0; // transparent
-        GLuint AlphaTexture = 0; // objects here
+        GLuint framebufferNT = 0, colorTextureNT = 0, depthRenderbuffer = 0;
+        GLuint framebuffer = 0, colorTexture = 0, alphaTexture = 0;
 
         void GenGLResources() override;
         void DeleteGLResources() override;
@@ -79,49 +71,20 @@ struct GLWidget::Impl
         void CleanupAfterTransparentRendering() const;
         void ApplyTextures() const;
     };
-    // /Transparent drawing ==================================================
+
+    struct CODBRenderStrategy : TransparentRenderStrategy
+    {
+        explicit CODBRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
+
+        void GenGLResources() override {}
+        void DeleteGLResources() override {}
+        void ReallocateFramebufferStorages(int, int) override {}
+        void Render(GLuint defaultFBO) const override;
+
+        void PrepareToTransparentRendering() const;
+        void CleanupAfterTransparentRendering() const;
+    };
 };
-
-void GLWidget::Impl::GenGLResources()
-{
-    auto f = GLFunctions();
-    f->glGenFramebuffers (1, &NTframebuffer);
-    f->glGenTextures     (1, &NTColorTexture);
-    f->glGenRenderbuffers(1, &DepthRenderbuffer);
-
-    ReallocateFramebufferStorages(1, 1);
-
-    f->glBindFramebuffer(GL_FRAMEBUFFER, NTframebuffer);
-    f->glFramebufferTexture2D(
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE, NTColorTexture, 0
-                             );
-    f->glFramebufferRenderbuffer(
-                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, DepthRenderbuffer
-                                );
-}
-
-void GLWidget::Impl::DeleteGLResources()
-{
-    auto f = GLFunctions();
-
-    f->glDeleteFramebuffers (1, &NTframebuffer);
-    f->glDeleteTextures     (1, &NTColorTexture);
-    f->glDeleteRenderbuffers(1, &DepthRenderbuffer);
-}
-
-void GLWidget::Impl::ReallocateFramebufferStorages(int w, int h)
-{
-    auto f = GLFunctions();
-
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, NTColorTexture);
-    f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
-                                GL_RGB16F, w, h, GL_TRUE                 );
-    f->glBindRenderbuffer(GL_RENDERBUFFER, DepthRenderbuffer);
-    f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
-                                         GL_DEPTH_COMPONENT, w, h        );
-}
 
 
 
@@ -144,16 +107,11 @@ GLWidget::~GLWidget()
 {
     makeCurrent();
 
-    auto f = Impl::GLFunctions();
-
-    impl->DeleteGLResources();
     impl->trs->DeleteGLResources();
 
-    for (auto vao : impl->vaos)
-    {
-        f->glDeleteVertexArrays(1, &vao);
-        assert(f->glGetError() == GL_NO_ERROR);
-    }
+    auto f = Impl::GLFunctions();
+    for (auto vao : impl->vaos) { f->glDeleteVertexArrays(1, &vao);
+                                  assert(f->glGetError() == GL_NO_ERROR); }
 
     doneCurrent();
 
@@ -169,7 +127,6 @@ void GLWidget::initializeGL()
     auto f = Impl::GLFunctions();
     f->glMinSampleShading(1.0f);
 
-    impl->GenGLResources();
     impl->trs->GenGLResources();
 }
 
@@ -185,13 +142,9 @@ void GLWidget::resizeGL(int width, int height)
 	if (width > height) halfWidth  *= aspect;
     else                halfHeight /= aspect;
 
-    float matdata[] = { 1 / halfWidth , 0             , 0,
-                        0             , 1 / halfHeight, 0,
-                        0             , 0             , 1  };
+    impl->projMat.data()[0] = 1 / halfWidth ;
+    impl->projMat.data()[4] = 1 / halfHeight;
 
-    std::copy(matdata, matdata + 9, impl->projMat.data());
-
-    impl->ReallocateFramebufferStorages();
     impl->trs->ReallocateFramebufferStorages();
 }
 
@@ -199,23 +152,15 @@ void GLWidget::resizeGL(int width, int height)
 OpenGLFunctions * GLWidget::Impl::GLFunctions()
 { return QOpenGLContext::currentContext()->versionFunctions<OpenGLFunctions>(); }
 
-void GLWidget::paintGL()
-{
-    auto f = Impl::GLFunctions();
-
-    impl->RenderNonTransparent();
-    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-    impl->trs->Render(defaultFramebufferObject());
-}
+void GLWidget::paintGL() { impl->trs->Render(defaultFramebufferObject()); }
 
 void GLWidget::Impl::RenderNonTransparent() const
 {
     auto f = GLFunctions();
 
-    GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    static constexpr GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     static constexpr GLfloat clearDepth = 1.0f;
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, NTframebuffer);
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
     f->glClearBufferfv(GL_DEPTH, 0, &clearDepth);
 
@@ -223,81 +168,107 @@ void GLWidget::Impl::RenderNonTransparent() const
     for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawNonTransparent(f, projMat);
 }
 
-void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
-{
-    static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-    static constexpr GLfloat clearAlpha = 1.0f;
 
-    auto f = GLFunctions();
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    f->glClearBufferfv(GL_COLOR, 0,  clearColor);
-    f->glClearBufferfv(GL_COLOR, 1, &clearAlpha);
-    PrepareToTransparentRendering();
-
-    auto & iter = GlassWallIterator::Instance();
-    for (iter.Reset(); !iter.AtEnd(); ++iter) iter->DrawTransparent(f, impl.projMat);
-
-    CleanupAfterTransparentRendering();
-
-    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
-    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
-
-    ApplyTextures();
-}
 
 void GLWidget::Impl::WBOITRenderStrategy::GenGLResources()
 {
     auto f = GLFunctions();
 
-    f->glGenFramebuffers (1, &framebuffer);
-    f->glGenTextures     (1, &ColorTexture);
-    f->glGenTextures     (1, &AlphaTexture);
+    f->glGenFramebuffers (1, &framebufferNT);
+    f->glGenTextures     (1, &colorTextureNT);
+    f->glGenRenderbuffers(1, &depthRenderbuffer);
+
+    f->glGenFramebuffers(1, &framebuffer);
+    f->glGenTextures    (1, &colorTexture);
+    f->glGenTextures    (1, &alphaTexture);
 
     ReallocateFramebufferStorages(1, 1);
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebufferNT);
     f->glFramebufferTexture2D(
             GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE,  ColorTexture, 0
+            GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT, 0
                              );
-    f->glFramebufferTexture2D(
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-            GL_TEXTURE_2D_MULTISAMPLE,  AlphaTexture, 0
+    f->glFramebufferRenderbuffer(
+                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                GL_RENDERBUFFER, depthRenderbuffer
+                                );
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D_MULTISAMPLE, colorTexture, 0
+                             );
+    f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
+                               GL_TEXTURE_2D_MULTISAMPLE, alphaTexture, 0
                              );
     GLenum attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
     f->glDrawBuffers(2, attachments);
-    f->glFramebufferRenderbuffer(
-                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, impl.DepthRenderbuffer
+    f->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER, depthRenderbuffer
                                 );
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::DeleteGLResources()
 {
     auto f = GLFunctions();
+
+    f->glDeleteFramebuffers (1, &framebufferNT);
+    f->glDeleteTextures     (1, &colorTextureNT);
+    f->glDeleteRenderbuffers(1, &depthRenderbuffer);
+
     f->glDeleteFramebuffers (1, &framebuffer);
-    f->glDeleteTextures     (1, &ColorTexture);
-    f->glDeleteTextures     (1, &AlphaTexture);
+    f->glDeleteTextures     (1, &colorTexture);
+    f->glDeleteTextures     (1, &alphaTexture);
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::ReallocateFramebufferStorages(int w, int h)
 {
     auto f = GLFunctions();
 
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, impl.NTColorTexture);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_RGB16F, w, h, GL_TRUE                 );
-    f->glBindRenderbuffer(GL_RENDERBUFFER, impl.DepthRenderbuffer);
+    f->glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
     f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
                                          GL_DEPTH_COMPONENT, w, h        );
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ColorTexture);
+
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_RGBA16F, w, h, GL_TRUE                );
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, AlphaTexture);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, alphaTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
                                 GL_R16F, w, h, GL_TRUE                   );
+}
+
+void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
+{
+    auto f = GLFunctions();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebufferNT);
+    impl.RenderNonTransparent();
+
+    static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    static constexpr GLfloat clearAlpha = 1.0f;
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    f->glClearBufferfv(GL_COLOR, 0,  clearColor);
+    f->glClearBufferfv(GL_COLOR, 1, &clearAlpha);
+
+    PrepareToTransparentRendering();
+    {
+        auto & iter = GlassWallIterator::Instance();
+        for (iter.Reset(); !iter.AtEnd(); ++iter)
+            iter->DrawTransparentForWBOIT(f, impl.projMat);
+    }
+    CleanupAfterTransparentRendering();
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+    ApplyTextures();
 }
 
 
@@ -381,18 +352,61 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
     if (!res.program.bind()) assert(false);
 
     f->glActiveTexture(GL_TEXTURE0);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, impl.NTColorTexture);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT);
     f->glUniform1i(0, 0);
     f->glActiveTexture(GL_TEXTURE1);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ColorTexture);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
     f->glUniform1i(1, 1);
     f->glActiveTexture(GL_TEXTURE2);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, AlphaTexture);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, alphaTexture);
     f->glUniform1i(2, 2);
 
     f->glEnable(GL_MULTISAMPLE); f->glDisable(GL_DEPTH_TEST);
     f->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
 }
+
+
+
+
+
+void GLWidget::Impl::CODBRenderStrategy::Render(GLuint defaultFBO) const
+{
+    auto f = GLFunctions();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+    impl.RenderNonTransparent();
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+    PrepareToTransparentRendering();
+    {
+        auto & iter = GlassWallIterator::Instance();
+        for (iter.Reset(); !iter.AtEnd(); ++iter)
+            iter->DrawTransparentForCODB(f, impl.projMat);
+    }
+    CleanupAfterTransparentRendering();
+}
+
+
+
+void GLWidget::Impl::CODBRenderStrategy::PrepareToTransparentRendering() const
+{
+    auto f = GLFunctions();
+    f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE); f->glDepthFunc(GL_LEQUAL);
+    f->glDisable(GL_CULL_FACE);
+
+    f->glEnable(GL_BLEND);
+
+    f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    f->glBlendEquation(GL_FUNC_ADD);
+
+    f->glEnable(GL_MULTISAMPLE);
+}
+
+void GLWidget::Impl::CODBRenderStrategy::CleanupAfterTransparentRendering() const
+{ auto f = GLFunctions(); f->glDepthMask(GL_TRUE); f->glDisable(GL_BLEND); }
+
+
 
 
 

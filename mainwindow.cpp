@@ -118,7 +118,7 @@ MainWindow::MainWindow(QWidget * parent) :
     lbl = new QLabel(QStringLiteral("Classic order-dependent blending"), this);
     lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
     glay->addWidget(lbl, 1, 1);
-    impl->wgt_CODB = new GLWidget(GLWidget::TransparentRenderStrategyEnum::WBOIT, this);
+    impl->wgt_CODB  = new GLWidget(GLWidget::TransparentRenderStrategyEnum::CODB , this);
     glay->addWidget(impl->wgt_CODB, 2, 1);
 
     glay->setRowStretch(2, 1);
