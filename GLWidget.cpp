@@ -96,6 +96,8 @@ GLWidget::GLWidget(TransparentRenderStrategyEnum strategy, QWidget * parent)
     : QOpenGLWidget(parent), impl(std::make_unique<Impl>(strategy))
 {
     QSurfaceFormat format;
+    format.setMajorVersion(4); format.setMinorVersion(5);
+    format.setProfile(QSurfaceFormat::CoreProfile);
     format.setSamples(numOfSamples);
     setFormat(format);
     create();
