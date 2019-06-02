@@ -177,7 +177,7 @@ struct GlassWall_GLProgram {
     QOpenGLShaderProgram p;
     enum class Mode { NT, WBOIT, COIDB };
     static constexpr auto vs_source =
-            "#version 430                                                 \n"
+            "#version 450 core                                            \n"
             "layout (location = 0) in vec2 vertex;                        \n"
             "layout (location = 1) in uint edgeColorComponent;            \n"
             "layout (location = 2) in uint fillColorComponent;            \n"
@@ -196,7 +196,7 @@ struct GlassWall_GLProgram {
             "                          ) / 255;                           \n"
             "}                                                            \n";
     static constexpr auto gs_source =
-            "#version 430 core                                                     \n"
+            "#version 450 core                                                     \n"
             "layout (triangles) in;                                                \n"
             "layout (triangle_strip, max_vertices = 3) out;                        \n"
             "                                                                      \n"
@@ -214,14 +214,14 @@ struct GlassWall_GLProgram {
             "    gl_Position = gl_in[2].gl_Position; EmitVertex(); EndPrimitive(); \n"
             "}                                                                     \n";
     static constexpr auto fs_source_NT =
-            "#version 430                              \n"
+            "#version 450 core                         \n"
             "                                          \n"
             "in vec3 color;                            \n"
             "out vec3 fragColor;                       \n"
             "                                          \n"
             "void main() { fragColor = color; }        \n";
     static constexpr auto fs_source_WBOIT =
-            "#version 430                                                 \n"
+            "#version 450 core                                            \n"
             "                                                             \n"
             "in vec3 color;                                               \n"
             "                                                             \n"
@@ -231,7 +231,7 @@ struct GlassWall_GLProgram {
             "layout (location = 3) uniform float w;                       \n"
             "void main() { outData = vec4(w * color, w); alpha = 1 - w; } \n";
     static constexpr auto fs_source_CODB =
-            "#version 430                                    \n"
+            "#version 450 core                               \n"
             "                                                \n"
             "in vec3 color;                                  \n"
             "out vec4 colorAndAlpha;                         \n"

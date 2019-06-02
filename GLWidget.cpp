@@ -18,12 +18,12 @@ GLWidgetSignalEmitter & GLWidgetSignalEmitter::Instance()
 
 struct GLWidget::Impl
 {
-    explicit Impl(TransparentRenderStrategyEnum s)
-        : trs(    s == TransparentRenderStrategyEnum::WBOIT
-                  ? std::unique_ptr<TransparentRenderStrategy>(
+    explicit Impl(RenderStrategyEnum s)
+        : trs(    s == RenderStrategyEnum::WBOIT
+                  ? std::unique_ptr<RenderStrategy>(
                         std::make_unique<WBOITRenderStrategy>(*this)
                                                               )
-                  : std::unique_ptr<TransparentRenderStrategy>(
+                  : std::unique_ptr<RenderStrategy>(
                         std::make_unique< CODBRenderStrategy>(*this)
                                                               )
              ){}
@@ -37,11 +37,10 @@ struct GLWidget::Impl
 
     void RenderNonTransparent() const;
 
-    // Transparent drawing ===================================================
-    struct TransparentRenderStrategy
+    struct RenderStrategy
     {
-        explicit TransparentRenderStrategy(Impl & impl_) : impl(impl_) {}
-        virtual ~TransparentRenderStrategy() = default;
+        explicit RenderStrategy(Impl & impl_) : impl(impl_) {}
+        virtual ~RenderStrategy() = default;
 
         virtual void GenGLResources() = 0;
         virtual void DeleteGLResources() = 0;
@@ -53,11 +52,11 @@ struct GLWidget::Impl
     protected:
         Impl & impl;
     };
-    std::unique_ptr<TransparentRenderStrategy> trs;
+    std::unique_ptr<RenderStrategy> trs;
 
-    struct WBOITRenderStrategy : TransparentRenderStrategy
+    struct WBOITRenderStrategy : RenderStrategy
     {
-        explicit WBOITRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
+        explicit WBOITRenderStrategy(Impl & impl_) : RenderStrategy(impl_) {}
 
         GLuint framebufferNT = 0, colorTextureNT = 0, depthRenderbuffer = 0;
         GLuint framebuffer = 0, colorTexture = 0, alphaTexture = 0;
@@ -72,9 +71,9 @@ struct GLWidget::Impl
         void ApplyTextures() const;
     };
 
-    struct CODBRenderStrategy : TransparentRenderStrategy
+    struct CODBRenderStrategy : RenderStrategy
     {
-        explicit CODBRenderStrategy(Impl & impl_) : TransparentRenderStrategy(impl_) {}
+        explicit CODBRenderStrategy(Impl & impl_) : RenderStrategy(impl_) {}
 
         GLuint dummyFramebuffer = 0;
 
@@ -92,7 +91,7 @@ struct GLWidget::Impl
 
 
 
-GLWidget::GLWidget(TransparentRenderStrategyEnum strategy, QWidget * parent)
+GLWidget::GLWidget(RenderStrategyEnum strategy, QWidget * parent)
     : QOpenGLWidget(parent), impl(std::make_unique<Impl>(strategy))
 {
     QSurfaceFormat format;
@@ -128,9 +127,6 @@ GLWidget::~GLWidget()
 
 void GLWidget::initializeGL()
 {
-    auto f = Impl::GLFunctions();
-    f->glMinSampleShading(1.0f);
-
     impl->trs->GenGLResources();
 }
 
@@ -179,24 +175,22 @@ void GLWidget::Impl::WBOITRenderStrategy::GenGLResources()
 {
     auto f = GLFunctions();
 
-    f->glGenFramebuffers (1, &framebufferNT);
-    f->glGenTextures     (1, &colorTextureNT);
+    f->glGenFramebuffers (1, &framebufferNT    );
+    f->glGenTextures     (1, &colorTextureNT   );
     f->glGenRenderbuffers(1, &depthRenderbuffer);
 
-    f->glGenFramebuffers(1, &framebuffer);
+    f->glGenFramebuffers(1, &framebuffer );
     f->glGenTextures    (1, &colorTexture);
     f->glGenTextures    (1, &alphaTexture);
 
     ReallocateFramebufferStorages(1, 1);
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, framebufferNT);
-    f->glFramebufferTexture2D(
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT, 0
+    f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT, 0
                              );
-    f->glFramebufferRenderbuffer(
-                GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                GL_RENDERBUFFER, depthRenderbuffer
+    f->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER, depthRenderbuffer
                                 );
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
@@ -269,7 +263,7 @@ void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
     }
     CleanupAfterTransparentRendering();
 
-    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+    f->glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     ApplyTextures();
@@ -282,8 +276,8 @@ void GLWidget::Impl::WBOITRenderStrategy::PrepareToTransparentRendering() const
     auto f = GLFunctions();
     f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE);
     f->glDepthFunc(GL_LEQUAL);
-    f->glEnable(GL_SAMPLE_SHADING);
     f->glDisable(GL_CULL_FACE);
+    f->glEnable(GL_MULTISAMPLE);
 
     f->glEnable(GL_BLEND);
 
@@ -292,8 +286,6 @@ void GLWidget::Impl::WBOITRenderStrategy::PrepareToTransparentRendering() const
 
     f->glBlendFunci(1, GL_DST_COLOR, GL_ZERO);
     f->glBlendEquationi(1, GL_FUNC_ADD);
-
-    f->glEnable(GL_MULTISAMPLE);
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::CleanupAfterTransparentRendering() const
@@ -301,7 +293,6 @@ void GLWidget::Impl::WBOITRenderStrategy::CleanupAfterTransparentRendering() con
     auto f = GLFunctions();
     f->glDepthMask(GL_TRUE);
     f->glDisable(GL_BLEND);
-    f->glDisable(GL_SAMPLE_SHADING);
 }
 
 
@@ -313,7 +304,7 @@ struct ApplyTTexturesGLResources {
     {
         if (!program.addShaderFromSourceCode(
                     QOpenGLShader::Vertex,
-                    "#version 430                                                 \n"
+                    "#version 450 core                                            \n"
                     "const vec2 p[4] = vec2[4](                                   \n"
                     "     vec2(-1, -1), vec2( 1, -1), vec2( 1,  1), vec2(-1,  1)  \n"
                     "                         );                                  \n"
@@ -322,25 +313,29 @@ struct ApplyTTexturesGLResources {
            ) assert(false);
         if (!program.addShaderFromSourceCode(
                     QOpenGLShader::Fragment,
-                    "#version 430                                                          \n"
+                    "#version 450 core                                                     \n"
                     "out vec4 outColor;                                                    \n"
                     "                                                                      \n"
-                    "layout (location = 0) uniform  sampler2DMS colorTexture;              \n"
-                    "layout (location = 1) uniform  sampler2DMS tcolorTexture;             \n"
-                    "layout (location = 2) uniform  sampler2DMS  alphaTexture;             \n"
+                    "layout (location = 0) uniform  sampler2DMS colorTextureNT;            \n"
+                    "layout (location = 1) uniform  sampler2DMS colorTexture;              \n"
+                    "layout (location = 2) uniform  sampler2DMS alphaTexture;              \n"
                     "                                                                      \n"
                     "void main() {                                                         \n"
                     "    ivec2 upos = ivec2(gl_FragCoord.xy);                              \n"
-                    "    vec4 cc = texelFetch(tcolorTexture, upos, gl_SampleID);           \n"
-                    "    vec3 sumOfTColors = cc.rgb;                                       \n"
+                    "                                                                      \n"
+                    "    vec4 cc = texelFetch(colorTexture, upos, gl_SampleID);            \n"
+                    "    vec3 sumOfColors = cc.rgb;                                        \n"
                     "    float sumOfWeights = cc.a;                                        \n"
-                    "    vec3  color = texelFetch(colorTexture, upos, gl_SampleID).rgb;    \n"
+                    "                                                                      \n"
+                    "    vec3  colorNT = texelFetch(colorTextureNT, upos, gl_SampleID).rgb;\n"
+                    "                                                                      \n"
                     "    if (sumOfWeights == 0)                                            \n"
-                    "    { outColor = vec4(color, 1.0); return; }                          \n"
+                    "    { outColor = vec4(colorNT, 1.0); return; }                        \n"
+                    "                                                                      \n"
                     "    float alpha = 1 - texelFetch(alphaTexture, upos, gl_SampleID).r;  \n"
-                    "    color = sumOfTColors / sumOfWeights * alpha + color * (1 - alpha);\n"
-                    "    outColor = vec4(color, 1.0);                                      \n"
-                    "    outColor = vec4(color, 1.0); return;                              \n"
+                    "    colorNT = sumOfColors / sumOfWeights * alpha +                    \n"
+                    "              colorNT * (1 - alpha);                                  \n"
+                    "    outColor = vec4(colorNT, 1.0);                                    \n"
                     "}                                                                     \n"
                                             )
            ) assert(false);
