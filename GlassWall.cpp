@@ -28,12 +28,13 @@ struct GlassWall::Impl
 
     bool m_vboNeedsToBeCreated = true;
     bool m_vboNeedsToBeReallocated = true;
-    std::optional<QOpenGLBuffer> m_vbo;
-    VAO_Holder m_vaoHolder;
+    std::optional<QOpenGLBuffer> m_tri_vbo;
+    VAO_Holder m_triFaces_vaoHolder, m_triEdges_vaoHolder;
 
     void CreateVBO();
     void ReallocateVBO();
-    void SetupVAO(GLuint vao, OpenGLFunctions * f);
+    void SetupTriFacesVAO(GLuint vao, OpenGLFunctions * f);
+    void SetupTriEdgesVAO(GLuint vao, OpenGLFunctions * f);
 
     int  DepthLevel(       ) const { return m_depthLevel;                }
     void DepthLevel(int lvl)       { m_depthLevel = lvl; UpdateDepths(); }
@@ -101,65 +102,99 @@ GLfloat GlassWall::Impl::MyDepth()
 
 void GlassWall::Impl::CreateVBO()
 {
-    m_vbo.emplace(QOpenGLBuffer::VertexBuffer);
-    if (!m_vbo->create()) assert(false);
-    if (!m_vbo->bind()) assert(false);
-    m_vbo->setUsagePattern(QOpenGLBuffer::StaticDraw);
+    m_tri_vbo.emplace(QOpenGLBuffer::VertexBuffer);
+    if (!m_tri_vbo->create()) assert(false);
+    if (!m_tri_vbo->bind()) assert(false);
+    m_tri_vbo->setUsagePattern(QOpenGLBuffer::StaticDraw);
+
     m_vboNeedsToBeCreated = false;
 }
 
 void GlassWall::Impl::ReallocateVBO()
 {
-    size_t size = m_vertices.size() * (sizeof(QVector2D) + 2);
-    std::vector<uint8_t> data; data.resize(size);
     assert(m_vertices.size() == m_edgeColors.size() * 3);
     assert(m_fillColors.size() == m_edgeColors.size());
 
-    auto it_ec = m_edgeColors.cbegin(); auto it_fc = m_fillColors.cbegin();
-    uint8_t * ptr = &data[0]; uint8_t vit = 0;
-    for (auto it_v = m_vertices.cbegin(); it_v != m_vertices.cend(); ++it_v)
-    {
-        reinterpret_cast<QVector2D &>(*ptr) = *it_v; ptr += sizeof(QVector2D);
+    size_t posOffset = 0,
+           fcOffset =            m_vertices  .size() * sizeof(float  ) * 2,
+           ecOffset = fcOffset + m_fillColors.size() * sizeof(uint8_t) * 3,
+           size     = ecOffset + m_edgeColors.size() * sizeof(uint8_t) * 3;
+    std::vector<uint8_t> data(size);
 
-        if (vit == 0)
-        {
-            *ptr++ = static_cast<uint8_t>(it_ec->red  ());
-            *ptr++ = static_cast<uint8_t>(it_fc->red  ());
-            ++vit;
-        }
-        else if (vit == 1)
-        {
-            *ptr++ = static_cast<uint8_t>(it_ec->green());
-            *ptr++ = static_cast<uint8_t>(it_fc->green());
-            ++vit;
-        }
-        else
-        {
-            assert(vit == 2);
-            *ptr++ = static_cast<uint8_t>(it_ec->blue ());
-            *ptr++ = static_cast<uint8_t>(it_fc->blue ());
-            vit = 0; ++it_ec; ++it_fc;
-        }
+    float   *  p_ptr = reinterpret_cast<float *>(&data[posOffset]);
+    uint8_t * fc_ptr = &data[ fcOffset];
+    uint8_t * ec_ptr = &data[ ecOffset];
+
+    auto it_ec = m_edgeColors.cbegin(); auto it_fc = m_fillColors.cbegin();
+    for (auto it_v = m_vertices.cbegin(); it_v != m_vertices.cend();)
+    {
+        for (uint8_t i = 0; i != 3; ++i)
+        { *p_ptr++ = it_v->x(); *p_ptr++ = it_v->y(); ++it_v; }
+
+        *fc_ptr++ = static_cast<uint8_t>(it_fc->red  ());
+        *fc_ptr++ = static_cast<uint8_t>(it_fc->green());
+        *fc_ptr++ = static_cast<uint8_t>(it_fc->blue ());
+
+        *ec_ptr++ = static_cast<uint8_t>(it_ec->red  ());
+        *ec_ptr++ = static_cast<uint8_t>(it_ec->green());
+        *ec_ptr++ = static_cast<uint8_t>(it_ec->blue ());
+
+        ++it_ec; ++it_fc;
     }
-    m_vbo->allocate(data.data(), static_cast<int>(size));
+    m_tri_vbo->allocate(data.data(), static_cast<int>(data.size()));
+
     m_vboNeedsToBeReallocated = false;
 }
 
-void GlassWall::Impl::SetupVAO(GLuint vao, OpenGLFunctions * f)
+void GlassWall::Impl::SetupTriFacesVAO(GLuint vao, OpenGLFunctions * f)
 {
     f->glBindVertexArray(vao);
+    assert(m_tri_vbo->isCreated());
+    if (!m_tri_vbo->bind()) assert(false);
 
-    GLsizei stride = sizeof(QVector2D) + 2;
-    f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, nullptr);
+    static constexpr GLsizei stride = sizeof(float) * 6;
+    static const GLvoid * offset0 = reinterpret_cast<const void *>(0                );
+    static const GLvoid * offset1 = reinterpret_cast<const void *>(2 * sizeof(float));
+    static const GLvoid * offset2 = reinterpret_cast<const void *>(4 * sizeof(float));
+    f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, offset0);
     f->glEnableVertexAttribArray(0);
-    f->glVertexAttribIPointer( 1, 1, GL_UNSIGNED_BYTE, stride,
-                               reinterpret_cast<void *>(sizeof(QVector2D)    ) );
+    f->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, offset1);
     f->glEnableVertexAttribArray(1);
-    f->glVertexAttribIPointer( 2, 1, GL_UNSIGNED_BYTE, stride,
-                               reinterpret_cast<void *>(sizeof(QVector2D) + 1) );
+    f->glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, offset2);
     f->glEnableVertexAttribArray(2);
 
-    m_vaoHolder.VAO_SetReady();
+    auto fcOffset = reinterpret_cast<void *>(m_vertices.size() * sizeof(float) * 2);
+
+    f->glVertexAttribIPointer(3, 3, GL_UNSIGNED_BYTE, 3, fcOffset);
+    f->glEnableVertexAttribArray(3);
+
+    m_triFaces_vaoHolder.VAO_SetReady();
+}
+
+void GlassWall::Impl::SetupTriEdgesVAO(GLuint vao, OpenGLFunctions * f)
+{
+    f->glBindVertexArray(vao);
+    assert(m_tri_vbo->isCreated());
+    if (!m_tri_vbo->bind()) assert(false);
+
+    static constexpr GLsizei stride = sizeof(float) * 6;
+    static const GLvoid * offset0 = reinterpret_cast<const void *>(0                );
+    static const GLvoid * offset1 = reinterpret_cast<const void *>(2 * sizeof(float));
+    static const GLvoid * offset2 = reinterpret_cast<const void *>(4 * sizeof(float));
+    f->glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, stride, offset0);
+    f->glEnableVertexAttribArray(0);
+    f->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, offset1);
+    f->glEnableVertexAttribArray(1);
+    f->glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, offset2);
+    f->glEnableVertexAttribArray(2);
+
+    auto ecOffset = reinterpret_cast<void *>( m_vertices.size() * sizeof(float) * 2 +
+                                              m_fillColors.size() * 3                 );
+
+    f->glVertexAttribIPointer(3, 3, GL_UNSIGNED_BYTE, 3, ecOffset);
+    f->glEnableVertexAttribArray(3);
+
+    m_triEdges_vaoHolder.VAO_SetReady();
 }
 
 void GlassWall::Impl::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
@@ -175,69 +210,82 @@ void GlassWall::Impl::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
 
 struct GlassWall_GLProgram {
     QOpenGLShaderProgram p;
-    enum class Mode { NT, WBOIT, COIDB };
     static constexpr auto vs_source =
-            "#version 450 core                                            \n"
-            "layout (location = 0) in vec2 vertex;                        \n"
-            "layout (location = 1) in uint edgeColorComponent;            \n"
-            "layout (location = 2) in uint fillColorComponent;            \n"
-            "                                                             \n"
-            "layout (location = 0) uniform float d;                       \n"
-            "layout (location = 1) uniform mat3 tr;                       \n"
-            "layout (location = 2) uniform bool drawEdges;                \n"
-            "                                                             \n"
-            "out float colorComponent;                                    \n"
-            "                                                             \n"
-            "void main()                                                  \n"
-            "{                                                            \n"
-            "    gl_Position = vec4(tr * vec3(vertex, d), 1);             \n"
-            "    colorComponent = float( drawEdges ? edgeColorComponent   \n"
-            "                                      : fillColorComponent   \n"
-            "                          ) / 255;                           \n"
-            "}                                                            \n";
-    static constexpr auto gs_source =
             "#version 450 core                                                     \n"
-            "layout (triangles) in;                                                \n"
-            "layout (triangle_strip, max_vertices = 3) out;                        \n"
+            "layout (location = 0) in vec2 vertex0;                                \n"
+            "layout (location = 1) in vec2 vertex1;                                \n"
+            "layout (location = 2) in vec2 vertex2;                                \n"
             "                                                                      \n"
-            "in float colorComponent[];                                            \n"
-            "out vec3 color;                                                       \n"
+            "layout (location = 3) in uvec3 color;                                 \n"
+            "                                                                      \n"
+            "out vec2 gs_vertex0;                                                  \n"
+            "out vec2 gs_vertex1;                                                  \n"
+            "out vec2 gs_vertex2;                                                  \n"
+            "                                                                      \n"
+            "out vec3 gs_color;                                                    \n"
             "                                                                      \n"
             "void main()                                                           \n"
             "{                                                                     \n"
-            "    color = vec3(                                                     \n"
-            "        colorComponent[0], colorComponent[1], colorComponent[2]       \n"
-            "                );                                                    \n"
-            "                                                                      \n"
-            "    gl_Position = gl_in[0].gl_Position; EmitVertex();                 \n"
-            "    gl_Position = gl_in[1].gl_Position; EmitVertex();                 \n"
-            "    gl_Position = gl_in[2].gl_Position; EmitVertex(); EndPrimitive(); \n"
+            "    gs_vertex0 = vertex0; gs_vertex1 = vertex1; gs_vertex2 = vertex2; \n"
+            "    gs_color = vec3(vec3(color) / 255);                               \n"
             "}                                                                     \n";
+    static constexpr auto gs_source =
+            "#version 450 core                                              \n"
+            "layout (points) in;                                            \n"
+            "layout (triangle_strip, max_vertices = 3) out;                 \n"
+            "                                                               \n"
+            "layout (location = 0) uniform float d;                         \n"
+            "layout (location = 1) uniform mat3 tr;                         \n"
+            "                                                               \n"
+            "in vec2 gs_vertex0[];                                          \n"
+            "in vec2 gs_vertex1[];                                          \n"
+            "in vec2 gs_vertex2[];                                          \n"
+            "                                                               \n"
+            "in vec3 gs_color[];                                            \n"
+            "                                                               \n"
+            "out flat vec3 fs_color;                                        \n"
+            "                                                               \n"
+            "void main()                                                    \n"
+            "{                                                              \n"
+            "    // Provoking vertex:                                       \n"
+            "    gl_Position = vec4(  ( tr * vec3(gs_vertex0[0], 1) ).xy,   \n"
+            "                         d, 1                                  \n"
+            "                      ); fs_color = gs_color[0]; EmitVertex(); \n"
+            "    gl_Position = vec4(  ( tr * vec3(gs_vertex1[0], 1) ).xy,   \n"
+            "                         d, 1                                  \n"
+            "                      ); EmitVertex();                         \n"
+            "    gl_Position = vec4(  ( tr * vec3(gs_vertex2[0], 1) ).xy,   \n"
+            "                         d, 1                                  \n"
+            "                      ); EmitVertex();                         \n"
+            "    EmitVertex(); EndPrimitive();                              \n"
+            "}                                                              \n";
     static constexpr auto fs_source_NT =
-            "#version 450 core                         \n"
-            "                                          \n"
-            "in vec3 color;                            \n"
-            "out vec3 fragColor;                       \n"
-            "                                          \n"
-            "void main() { fragColor = color; }        \n";
+            "#version 450 core                 \n"
+            "                                  \n"
+            "in vec3 fs_color;                 \n"
+            "out vec3 color;                   \n"
+            "                                  \n"
+            "void main() { color = fs_color; } \n";
     static constexpr auto fs_source_WBOIT =
-            "#version 450 core                                            \n"
-            "                                                             \n"
-            "in vec3 color;                                               \n"
-            "                                                             \n"
-            "layout (location = 0) out vec4 outData;                      \n"
-            "layout (location = 1) out float alpha;                       \n"
-            "                                                             \n"
-            "layout (location = 3) uniform float w;                       \n"
-            "void main() { outData = vec4(w * color, w); alpha = 1 - w; } \n";
+            "#version 450 core                                               \n"
+            "                                                                \n"
+            "in vec3 fs_color;                                               \n"
+            "                                                                \n"
+            "layout (location = 0) out vec4 outData;                         \n"
+            "layout (location = 1) out float alpha;                          \n"
+            "                                                                \n"
+            "layout (location = 2) uniform float w;                          \n"
+            "void main() { outData = vec4(w * fs_color, w); alpha = 1 - w; } \n";
     static constexpr auto fs_source_CODB =
-            "#version 450 core                               \n"
-            "                                                \n"
-            "in vec3 color;                                  \n"
-            "out vec4 colorAndAlpha;                         \n"
-            "layout (location = 3) uniform float w;          \n"
-            "                                                \n"
-            "void main() { colorAndAlpha = vec4(color, w); } \n";
+            "#version 450 core                          \n"
+            "                                           \n"
+            "in vec3 fs_color;                          \n"
+            "out vec4 color;                            \n"
+            "layout (location = 2) uniform float w;     \n"
+            "                                           \n"
+            "void main() { color = vec4(fs_color, w); } \n";
+
+    enum class Mode { NT, WBOIT, CODB };
     explicit GlassWall_GLProgram(Mode mode)
     {
         if (!p.addShaderFromSourceCode(QOpenGLShader::Vertex  , vs_source)) assert(false);
@@ -252,7 +300,7 @@ struct GlassWall_GLProgram {
             if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_WBOIT))
                 assert(false);
             break;
-        case Mode::COIDB:
+        case Mode::CODB:
             if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_CODB ))
                 assert(false);
             break;
@@ -273,27 +321,29 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 &
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
-    f->glUniform1i(2, GL_TRUE);
 
-    auto [vao, ready] = m_vaoHolder.GetVAO();
+    auto [vao, ready] = m_triEdges_vaoHolder.GetVAO();
     f->glBindVertexArray(vao);
-    if (!m_vbo->bind()) assert(false);
-    if (!ready) SetupVAO(vao, f);
+    if (!ready) SetupTriEdgesVAO(vao, f);
+    if (!m_tri_vbo->bind()) assert(false);
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
     f->glDepthFunc(GL_LEQUAL);
     f->glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    f->glDrawArrays( GL_TRIANGLES, 0,
-                     static_cast<GLsizei>(m_vertices.size()) );
+    f->glDrawArrays( GL_POINTS, 0,
+                     static_cast<GLsizei>(m_edgeColors.size()) );
     f->glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     if (!m_transparent)
     {
-        f->glUniform1i(2, GL_FALSE);
-        f->glDrawArrays( GL_TRIANGLES, 0,
-                         static_cast<GLsizei>(m_vertices.size()) );
+        auto [vao, ready] = m_triFaces_vaoHolder.GetVAO();
+        f->glBindVertexArray(vao);
+        if (!ready) SetupTriFacesVAO(vao, f);
+        if (!m_tri_vbo->bind()) assert(false);
+
+        f->glDrawArrays( GL_POINTS, 0,
+                         static_cast<GLsizei>(m_fillColors.size()) );
     }
-    f->glBindVertexArray(0);
 }
 
 void GlassWall::Impl::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat)
@@ -308,18 +358,17 @@ void GlassWall::Impl::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
-    f->glUniform1i(2, GL_FALSE);
-    f->glUniform1f(3, m_opacity);
+    f->glUniform1f(2, m_opacity);
 
-    auto [vao, ready] = m_vaoHolder.GetVAO();
+    auto [vao, ready] = m_triFaces_vaoHolder.GetVAO();
     f->glBindVertexArray(vao);
-    if (!m_vbo->bind()) assert(false);
-    if (!ready) SetupVAO(vao, f);
+    if (!ready) SetupTriFacesVAO(vao, f);
+    if (!m_tri_vbo->bind()) assert(false);
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
     f->glDepthFunc(GL_LEQUAL);
-    f->glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
+    f->glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_fillColors.size()));
 }
 
 void GlassWall::Impl::DrawTransparentForCODB(OpenGLFunctions * f, const QMatrix3x3 & projMat)
@@ -328,24 +377,23 @@ void GlassWall::Impl::DrawTransparentForCODB(OpenGLFunctions * f, const QMatrix3
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
-    static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::COIDB);
+    static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::CODB);
     assert (program.p.isLinked());
     if (!program.p.bind()) assert(false);
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
-    f->glUniform1i(2, GL_FALSE);
-    f->glUniform1f(3, m_opacity);
+    f->glUniform1f(2, m_opacity);
 
-    auto [vao, ready] = m_vaoHolder.GetVAO();
+    auto [vao, ready] = m_triFaces_vaoHolder.GetVAO();
     f->glBindVertexArray(vao);
-    if (!m_vbo->bind()) assert(false);
-    if (!ready) SetupVAO(vao, f);
+    if (!ready) SetupTriFacesVAO(vao, f);
+    if (!m_tri_vbo->bind()) assert(false);
 
     f->glEnable(GL_DEPTH_TEST);
     f->glEnable(GL_MULTISAMPLE);
     f->glDepthFunc(GL_LEQUAL);
-    f->glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(m_vertices.size()));
+    f->glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_fillColors.size()));
 }
 
 

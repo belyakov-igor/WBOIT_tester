@@ -45,7 +45,7 @@ void MainWindow::Impl::ArrangeWallSettings()
 
         auto blackWall = new QLabel(wgt);
         glay->addWidget(blackWall, 0, 0, 5, 1);
-        auto pmap = QPixmap(2, 200); pmap.fill(Qt::black);
+        auto pmap = QPixmap(2, 110); pmap.fill(Qt::black);
         blackWall->setPixmap(std::move(pmap));
 
         auto lbl = new QLabel( QString(QStringLiteral("Depth level %1"))

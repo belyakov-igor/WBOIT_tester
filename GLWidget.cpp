@@ -158,7 +158,7 @@ void GLWidget::Impl::RenderNonTransparent() const
 {
     auto f = GLFunctions();
 
-    static constexpr GLfloat clearColor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    static constexpr GLfloat clearColor[3] = {0.0f, 0.0f, 0.0f};
     static constexpr GLfloat clearDepth = 1.0f;
 
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
@@ -187,24 +187,19 @@ void GLWidget::Impl::WBOITRenderStrategy::GenGLResources()
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, framebufferNT);
     f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT, 0
-                             );
+                               GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT, 0 );
     f->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                                  GL_RENDERBUFFER, depthRenderbuffer
-                                );
+                                  GL_RENDERBUFFER, depthRenderbuffer   );
 
     f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_2D_MULTISAMPLE, colorTexture, 0
-                             );
+                               GL_TEXTURE_2D_MULTISAMPLE, colorTexture, 0 );
     f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-                               GL_TEXTURE_2D_MULTISAMPLE, alphaTexture, 0
-                             );
+                               GL_TEXTURE_2D_MULTISAMPLE, alphaTexture, 0 );
     GLenum attachments[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
     f->glDrawBuffers(2, attachments);
     f->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                                  GL_RENDERBUFFER, depthRenderbuffer
-                                );
+                                  GL_RENDERBUFFER, depthRenderbuffer   );
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::DeleteGLResources()
@@ -249,11 +244,11 @@ void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
     static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     static constexpr GLfloat clearAlpha = 1.0f;
 
-    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
-
     f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
     f->glClearBufferfv(GL_COLOR, 1, &clearAlpha);
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
 
     PrepareToTransparentRendering();
     {
@@ -347,6 +342,9 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
 {
     auto f = GLFunctions();
     static ApplyTTexturesGLResources res;
+
+    static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    f->glClearBufferfv(GL_COLOR, 0,  clearColor);
 
     if (!res.program.bind()) assert(false);
 
