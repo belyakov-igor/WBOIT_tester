@@ -148,9 +148,9 @@ void MainWindow::InitWalls() const
     {
         static constexpr QVector2D a{-0.1f, -0.6f}, b{0.1f, -0.6f}, c{0.0f, -0.9f};
         static constexpr QVector2D d{-0.1f, -0.9f}, e{0.1f, -0.9f}, f{0.0f, -0.6f};
-        QColor clrs [] = { QColor(255, 0, 0), QColor(255, 130, 0), QColor(255, 220, 0),
-                           QColor(0, 255, 0), QColor(0, 200, 255), QColor(0, 100, 255),
-                           QColor(100, 0, 255), QColor(220, 0, 200) };
+        QColor clrs [] = { QColor(111, 0, 0), QColor(111, 25, 0), QColor(111, 80, 0),
+                           QColor(0, 111, 0), QColor(0, 65, 111), QColor(0, 14, 111),
+                           QColor(14, 0, 111), QColor(80, 0, 65) };
 
         static constexpr uint8_t count = 8;
         static const float angleStep = 2 * g_pi_f / count;
@@ -164,16 +164,16 @@ void MainWindow::InitWalls() const
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
-                               Qt::white, clrs[i]                              );
+                               QColor(111, 111, 111), clrs[i]                  );
             wall2.AddTriangle( Mult(d, rot_t), Mult(e, rot_t), Mult(f, rot_t),
-                               Qt::white, clrs[i]                              );
+                               QColor(111, 111, 111), clrs[i]                  );
         }
     }
     {
         static constexpr QVector2D a{-0.9f, -0.04f}, b{-0.9f, 0.04f}, c{0.0f, 0.0f};
-        QColor clrs [] = { QColor(80, 150, 120), QColor(100, 130, 45), QColor(170, 100, 40),
-                           QColor(40, 110, 145), QColor(140, 50, 50), QColor(50, 145, 145),
-                           QColor(80, 65, 130), QColor(125, 30, 130) };
+        QColor clrs [] = { QColor(9, 35, 21), QColor(14, 25, 45), QColor(45, 14, 2),
+                           QColor(2, 17, 32), QColor(30, 3, 3), QColor(3, 32, 32),
+                           QColor(9, 5, 1), QColor(125, 1, 1) };
 
         static constexpr uint8_t count = 8;
         static const float angleStep = 2 * g_pi_f / count;
@@ -186,13 +186,13 @@ void MainWindow::InitWalls() const
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
-                               Qt::yellow, clrs[i]                             );
+                               QColor(111, 111, 0), clrs[i]                    );
         }
     }
     {
         static constexpr QVector2D a{-1.0f, 0.0f}, b{0.0f, 0.0f}, c{0.0f, 1.0f};
-        QColor clrs [] = { QColor(255, 255, 255), QColor(0, 255, 255),
-                           QColor(127, 127, 127), QColor(35, 35, 100)  };
+        QColor clrs [] = { QColor(111, 111, 111), QColor(0, 111, 111),
+                           QColor(24, 24, 24), QColor(2, 2, 14)  };
 
         static constexpr uint8_t count = 4;
         static const float angleStep = 2 * g_pi_f / count;

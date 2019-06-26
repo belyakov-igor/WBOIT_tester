@@ -22,10 +22,10 @@ struct GLWidget::Impl
         : trs(    s == RenderStrategyEnum::WBOIT
                   ? std::unique_ptr<RenderStrategy>(
                         std::make_unique<WBOITRenderStrategy>(*this)
-                                                              )
+                                                   )
                   : std::unique_ptr<RenderStrategy>(
                         std::make_unique< CODBRenderStrategy>(*this)
-                                                              )
+                                                   )
              ){}
 
     std::unordered_set<GLuint> vaos;
@@ -75,10 +75,8 @@ struct GLWidget::Impl
     {
         explicit CODBRenderStrategy(Impl & impl_) : RenderStrategy(impl_) {}
 
-        GLuint dummyFramebuffer = 0;
-
-        void GenGLResources() override;
-        void DeleteGLResources() override;
+        void GenGLResources() override {}
+        void DeleteGLResources() override {}
         void ReallocateFramebufferStorages(int, int) override {}
         void Render(GLuint defaultFBO) const override;
 
@@ -98,7 +96,9 @@ GLWidget::GLWidget(RenderStrategyEnum strategy, QWidget * parent)
     format.setMajorVersion(4); format.setMinorVersion(5);
     format.setProfile(QSurfaceFormat::CoreProfile);
     format.setSamples(numOfSamples);
+    format.setColorSpace(QSurfaceFormat::sRGBColorSpace);
     setFormat(format);
+    setTextureFormat(GL_SRGB8_ALPHA8);
     create();
 
     g_GLWidgets.push_back(this);
@@ -128,6 +128,8 @@ GLWidget::~GLWidget()
 void GLWidget::initializeGL()
 {
     impl->trs->GenGLResources();
+
+    Impl::GLFunctions()->glDisable(GL_FRAMEBUFFER_SRGB);
 }
 
 void GLWidget::resizeGL(int width, int height)
@@ -221,7 +223,7 @@ void GLWidget::Impl::WBOITRenderStrategy::ReallocateFramebufferStorages(int w, i
 
     f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
-                                GL_RGB16F, w, h, GL_TRUE                 );
+                                GL_R11F_G11F_B10F, w, h, GL_TRUE         );
     f->glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
     f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
                                          GL_DEPTH_COMPONENT, w, h        );
@@ -258,9 +260,9 @@ void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
     }
     CleanupAfterTransparentRendering();
 
+    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     f->glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     ApplyTextures();
 }
 
@@ -343,9 +345,6 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
     auto f = GLFunctions();
     static ApplyTTexturesGLResources res;
 
-    static constexpr GLfloat clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    f->glClearBufferfv(GL_COLOR, 0,  clearColor);
-
     if (!res.program.bind()) assert(false);
 
     f->glActiveTexture(GL_TEXTURE0);
@@ -366,19 +365,12 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
 
 
 
-void GLWidget::Impl::CODBRenderStrategy::GenGLResources()
-{ auto f = GLFunctions(); f->glGenFramebuffers (1, &dummyFramebuffer); }
-
-void GLWidget::Impl::CODBRenderStrategy::DeleteGLResources()
-{auto f = GLFunctions(); f->glDeleteFramebuffers (1, &dummyFramebuffer);}
-
 void GLWidget::Impl::CODBRenderStrategy::Render(GLuint defaultFBO) const
 {
     auto f = GLFunctions();
 
-    f->glBindFramebuffer(GL_FRAMEBUFFER, dummyFramebuffer); /* Anti-aliasing doesn't work
-        if you don't switch framebuffers here, hell if I know why. And this is the only
-        reason to have dummyFramebuffer in CODBRenderStrategy struct. */
+    f->glBindFramebuffer(GL_FRAMEBUFFER, 0); /* Anti-aliasing doesn't work
+        if you don't switch framebuffers here, hell if I know why.         */
     f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
     impl.RenderNonTransparent();
 
