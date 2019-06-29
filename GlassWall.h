@@ -55,9 +55,10 @@ public:
 
     void AddTriangle(QVector2D a, QVector2D b, QVector2D c, QColor edgeColor, QColor fillColor);
 
-    void DrawNonTransparent     (OpenGLFunctions * f, const QMatrix3x3 & projMat);
-    void DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat);
-    void DrawTransparentForCODB (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawNonTransparent        (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForWBOIT   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForCODB    (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForAdditive(OpenGLFunctions * f, const QMatrix3x3 & projMat);
 
 private:
     struct Impl; std::unique_ptr<Impl> impl;

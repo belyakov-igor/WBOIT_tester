@@ -50,9 +50,14 @@ struct GlassWall::Impl
     void AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                       QColor edgeColor, QColor fillColor     );
 
-    void DrawNonTransparent     (OpenGLFunctions * f, const QMatrix3x3 & projMat);
-    void DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat);
-    void DrawTransparentForCODB (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawNonTransparent        (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForWBOIT   (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForCODB    (OpenGLFunctions * f, const QMatrix3x3 & projMat);
+    void DrawTransparentForAdditive(OpenGLFunctions * f, const QMatrix3x3 & projMat);
+private:
+    enum class TransparentStrategy { WBOIT, CODB, Additive };
+    void DrawTransparent( OpenGLFunctions * f, const QMatrix3x3 & projMat,
+                          TransparentStrategy strategy                     );
 };
 
 GlassWall::GlassWall(int depthLevel, float opacity, bool transparent, bool visible)
@@ -116,14 +121,14 @@ void GlassWall::Impl::ReallocateVBO()
     assert(m_fillColors.size() == m_edgeColors.size());
 
     size_t posOffset = 0,
-           fcOffset =            m_vertices  .size() * sizeof(float  ) * 2,
-           ecOffset = fcOffset + m_fillColors.size() * sizeof(uint8_t) * 3,
-           size     = ecOffset + m_edgeColors.size() * sizeof(uint8_t) * 3;
+           fcOffset =            m_vertices  .size() * sizeof(float) * 2,
+           ecOffset = fcOffset + m_fillColors.size() * sizeof(RGB16),
+           size     = ecOffset + m_edgeColors.size() * sizeof(RGB16);
     std::vector<uint8_t> data(size);
 
-    float   *  p_ptr = reinterpret_cast<float *>(&data[posOffset]);
-    uint8_t * fc_ptr = &data[ fcOffset];
-    uint8_t * ec_ptr = &data[ ecOffset];
+    float *  p_ptr = reinterpret_cast<float *>(&data[posOffset]);
+    RGB16 * fc_ptr = reinterpret_cast<RGB16 *>(&data[ fcOffset]);
+    RGB16 * ec_ptr = reinterpret_cast<RGB16 *>(&data[ ecOffset]);
 
     auto it_ec = m_edgeColors.cbegin(); auto it_fc = m_fillColors.cbegin();
     for (auto it_v = m_vertices.cbegin(); it_v != m_vertices.cend();)
@@ -131,15 +136,8 @@ void GlassWall::Impl::ReallocateVBO()
         for (uint8_t i = 0; i != 3; ++i)
         { *p_ptr++ = it_v->x(); *p_ptr++ = it_v->y(); ++it_v; }
 
-        *fc_ptr++ = static_cast<uint8_t>(it_fc->red  ());
-        *fc_ptr++ = static_cast<uint8_t>(it_fc->green());
-        *fc_ptr++ = static_cast<uint8_t>(it_fc->blue ());
-
-        *ec_ptr++ = static_cast<uint8_t>(it_ec->red  ());
-        *ec_ptr++ = static_cast<uint8_t>(it_ec->green());
-        *ec_ptr++ = static_cast<uint8_t>(it_ec->blue ());
-
-        ++it_ec; ++it_fc;
+        *fc_ptr++ = SRGB_to_Linear(*it_fc++);
+        *ec_ptr++ = SRGB_to_Linear(*it_ec++);
     }
     m_tri_vbo->allocate(data.data(), static_cast<int>(data.size()));
 
@@ -165,7 +163,7 @@ void GlassWall::Impl::SetupTriFacesVAO(GLuint vao, OpenGLFunctions * f)
 
     auto fcOffset = reinterpret_cast<void *>(m_vertices.size() * sizeof(float) * 2);
 
-    f->glVertexAttribIPointer(3, 3, GL_UNSIGNED_BYTE, 3, fcOffset);
+    f->glVertexAttribPointer(3, 3, GL_UNSIGNED_SHORT, GL_TRUE, sizeof(RGB16), fcOffset);
     f->glEnableVertexAttribArray(3);
 
     m_triFaces_vaoHolder.VAO_SetReady();
@@ -189,9 +187,9 @@ void GlassWall::Impl::SetupTriEdgesVAO(GLuint vao, OpenGLFunctions * f)
     f->glEnableVertexAttribArray(2);
 
     auto ecOffset = reinterpret_cast<void *>( m_vertices.size() * sizeof(float) * 2 +
-                                              m_fillColors.size() * 3                 );
+                                              m_fillColors.size() * sizeof(RGB16)     );
 
-    f->glVertexAttribIPointer(3, 3, GL_UNSIGNED_BYTE, 3, ecOffset);
+    f->glVertexAttribPointer(3, 3, GL_UNSIGNED_SHORT, GL_TRUE, sizeof(RGB16), ecOffset);
     f->glEnableVertexAttribArray(3);
 
     m_triEdges_vaoHolder.VAO_SetReady();
@@ -216,7 +214,7 @@ struct GlassWall_GLProgram {
             "layout (location = 1) in vec2 vertex1;                                \n"
             "layout (location = 2) in vec2 vertex2;                                \n"
             "                                                                      \n"
-            "layout (location = 3) in uvec3 color;                                 \n"
+            "layout (location = 3) in vec3 color;                                  \n"
             "                                                                      \n"
             "out vec2 gs_vertex0;                                                  \n"
             "out vec2 gs_vertex1;                                                  \n"
@@ -227,7 +225,7 @@ struct GlassWall_GLProgram {
             "void main()                                                           \n"
             "{                                                                     \n"
             "    gs_vertex0 = vertex0; gs_vertex1 = vertex1; gs_vertex2 = vertex2; \n"
-            "    gs_color = vec3(vec3(color) / 255);                               \n"
+            "    gs_color = color;                                                 \n"
             "}                                                                     \n";
     static constexpr auto gs_source =
             "#version 450 core                                              \n"
@@ -284,8 +282,16 @@ struct GlassWall_GLProgram {
             "layout (location = 2) uniform float w;     \n"
             "                                           \n"
             "void main() { color = vec4(fs_color, w); } \n";
+    static constexpr auto fs_source_Additive =
+            "#version 450 core                           \n"
+            "                                            \n"
+            "in vec3 fs_color;                           \n"
+            "out vec3 color;                             \n"
+            "layout (location = 2) uniform float w;      \n"
+            "                                            \n"
+            "void main() { color = vec3(fs_color * w); } \n";
 
-    enum class Mode { NT, WBOIT, CODB };
+    enum class Mode { NT, WBOIT, CODB, Additive };
     explicit GlassWall_GLProgram(Mode mode)
     {
         if (!p.addShaderFromSourceCode(QOpenGLShader::Vertex  , vs_source)) assert(false);
@@ -293,15 +299,19 @@ struct GlassWall_GLProgram {
         switch (mode)
         {
         case Mode::NT:
-            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_NT   ))
+            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_NT       ))
                 assert(false);
             break;
         case Mode::WBOIT:
-            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_WBOIT))
+            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_WBOIT    ))
                 assert(false);
             break;
         case Mode::CODB:
-            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_CODB ))
+            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_CODB     ))
+                assert(false);
+            break;
+        case Mode::Additive:
+            if (!p.addShaderFromSourceCode(QOpenGLShader::Fragment, fs_source_Additive ))
                 assert(false);
             break;
         }
@@ -346,15 +356,38 @@ void GlassWall::Impl::DrawNonTransparent(OpenGLFunctions * f, const QMatrix3x3 &
     }
 }
 
-void GlassWall::Impl::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+
+void GlassWall::Impl::DrawTransparent( OpenGLFunctions * f, const QMatrix3x3 & projMat,
+                                       TransparentStrategy strategy                     )
 {
     if (!m_visible || m_vertices.empty() || !m_transparent) return;
     if (m_vboNeedsToBeCreated) CreateVBO();
     if (m_vboNeedsToBeReallocated) ReallocateVBO();
 
-    static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::WBOIT);
-    assert (program.p.isLinked());
-    if (!program.p.bind()) assert(false);
+    QOpenGLShaderProgram * p;
+    switch (strategy)
+    {
+        case TransparentStrategy::WBOIT:
+        {
+            static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::WBOIT);
+            p = &program.p;
+            break;
+        }
+        case TransparentStrategy::CODB:
+        {
+            static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::CODB);
+           p = &program.p;
+            break;
+        }
+        case TransparentStrategy::Additive:
+        {
+            static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::Additive);
+            p = &program.p;
+            break;
+        }
+    }
+    assert (p->isLinked());
+    if (!p->bind()) assert(false);
 
     f->glUniform1f(0, MyDepth());
     f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
@@ -371,30 +404,17 @@ void GlassWall::Impl::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix
     f->glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_fillColors.size()));
 }
 
-void GlassWall::Impl::DrawTransparentForCODB(OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{
-    if (!m_visible || m_vertices.empty() || !m_transparent) return;
-    if (m_vboNeedsToBeCreated) CreateVBO();
-    if (m_vboNeedsToBeReallocated) ReallocateVBO();
+void GlassWall::Impl::DrawTransparentForWBOIT   ( OpenGLFunctions * f,
+                                                  const QMatrix3x3 & projMat )
+{ DrawTransparent(f, projMat, TransparentStrategy::WBOIT); }
 
-    static GlassWall_GLProgram program(GlassWall_GLProgram::Mode::CODB);
-    assert (program.p.isLinked());
-    if (!program.p.bind()) assert(false);
+void GlassWall::Impl::DrawTransparentForCODB    ( OpenGLFunctions * f,
+                                                  const QMatrix3x3 & projMat)
+{ DrawTransparent(f, projMat, TransparentStrategy::CODB); }
 
-    f->glUniform1f(0, MyDepth());
-    f->glUniformMatrix3fv(1, 1, GL_FALSE, (projMat * m_transformation).data());
-    f->glUniform1f(2, m_opacity);
-
-    auto [vao, ready] = m_triFaces_vaoHolder.GetVAO();
-    f->glBindVertexArray(vao);
-    if (!ready) SetupTriFacesVAO(vao, f);
-    if (!m_tri_vbo->bind()) assert(false);
-
-    f->glEnable(GL_DEPTH_TEST);
-    f->glEnable(GL_MULTISAMPLE);
-    f->glDepthFunc(GL_LEQUAL);
-    f->glDrawArrays(GL_POINTS, 0, static_cast<GLsizei>(m_fillColors.size()));
-}
+void GlassWall::Impl::DrawTransparentForAdditive( OpenGLFunctions *f,
+                                                  const QMatrix3x3 &projMat )
+{ DrawTransparent(f, projMat, TransparentStrategy::Additive); }
 
 
 
@@ -444,14 +464,17 @@ void GlassWall::AddTriangle( QVector2D a, QVector2D b, QVector2D c,
                              QColor edgeColor, QColor fillColor     )
 { impl->AddTriangle(a, b, c, edgeColor, fillColor); }
 
-void GlassWall::DrawNonTransparent     (OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{ impl->DrawNonTransparent     (f, projMat); }
+void GlassWall::DrawNonTransparent        (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawNonTransparent        (f, projMat); }
 
-void GlassWall::DrawTransparentForWBOIT(OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{ impl->DrawTransparentForWBOIT(f, projMat); }
+void GlassWall::DrawTransparentForWBOIT   (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparentForWBOIT   (f, projMat); }
 
-void GlassWall::DrawTransparentForCODB (OpenGLFunctions * f, const QMatrix3x3 & projMat)
-{ impl->DrawTransparentForCODB (f, projMat); }
+void GlassWall::DrawTransparentForCODB    (OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparentForCODB    (f, projMat); }
+
+void GlassWall::DrawTransparentForAdditive(OpenGLFunctions * f, const QMatrix3x3 & projMat)
+{ impl->DrawTransparentForAdditive(f, projMat); }
 
 GlassWallIterator & GlassWallIterator::Instance() { static GlassWallIterator ins; return ins; }
 

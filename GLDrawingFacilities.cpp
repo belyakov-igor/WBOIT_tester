@@ -66,3 +66,13 @@ void VAO_Holder::VAO_SetReady()
     assert(it != impl->wgt_vao_map.end());
     it->second.second = true;
 }
+
+
+
+RGB16 SRGB_to_Linear(QColor c)
+{
+    constexpr auto max = std::numeric_limits<uint16_t>::max();
+    return RGB16( static_cast<uint16_t>(std::pow(c.redF  (), 2.2) * max),
+                  static_cast<uint16_t>(std::pow(c.greenF(), 2.2) * max),
+                  static_cast<uint16_t>(std::pow(c.blueF (), 2.2) * max)  );
+}

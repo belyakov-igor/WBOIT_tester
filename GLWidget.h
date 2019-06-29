@@ -12,7 +12,7 @@ class GLWidget : public QOpenGLWidget
 {
     Q_OBJECT
 public:
-    enum class RenderStrategyEnum { WBOIT, CODB };
+    enum class RenderStrategyEnum { WBOIT, CODB, Additive, AdditiveEP };
     explicit GLWidget(RenderStrategyEnum strategy, QWidget * parent);
     ~GLWidget() override;
 

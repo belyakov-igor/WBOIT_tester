@@ -17,7 +17,8 @@ struct MainWindow::Impl
     ~Impl() { delete ui; }
 
     Ui::MainWindow *ui = new Ui::MainWindow;
-    GLWidget * wgt_WBOIT = nullptr, * wgt_CODB = nullptr;
+    GLWidget * wgt_WBOIT = nullptr, * wgt_CODB = nullptr,
+             * wgt_Additive = nullptr, * wgt_AdditiveEP = nullptr;
 
     QWidget * settingsBoard = nullptr;
     QHBoxLayout * settingsBoardLayout = nullptr;
@@ -83,7 +84,8 @@ void MainWindow::Impl::ArrangeWallSettings()
         settingsBoardLayout->addWidget(*it);
 }
 
-void MainWindow::Impl::UpdateWidgets() { wgt_WBOIT->update(); wgt_CODB->update(); }
+void MainWindow::Impl::UpdateWidgets()
+{ wgt_WBOIT->update(); wgt_CODB->update(); wgt_Additive->update(); wgt_AdditiveEP->update(); }
 
 MainWindow::MainWindow(QWidget * parent) :
     QMainWindow(parent), impl(std::make_unique<Impl>())
@@ -121,9 +123,21 @@ MainWindow::MainWindow(QWidget * parent) :
     impl->wgt_CODB  = new GLWidget(GLWidget::RenderStrategyEnum::CODB , this);
     glay->addWidget(impl->wgt_CODB, 2, 1);
 
-    glay->setRowStretch(2, 1);
+    lbl = new QLabel(QStringLiteral("Additive blending"), this);
+    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
+    glay->addWidget(lbl, 3, 0);
+    impl->wgt_Additive = new GLWidget(GLWidget::RenderStrategyEnum::Additive, this);
+    glay->addWidget(impl->wgt_Additive, 4, 0);
+
+    lbl = new QLabel(QStringLiteral("Additive blending with exposition"), this);
+    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
+    glay->addWidget(lbl, 3, 1);
+    impl->wgt_AdditiveEP = new GLWidget(GLWidget::RenderStrategyEnum::AdditiveEP, this);
+    glay->addWidget(impl->wgt_AdditiveEP, 4, 1);
+
+    glay->setRowStretch(2, 1); glay->setRowStretch(4, 1);
     auto slider = new QSlider(Qt::Horizontal, this);
-    glay->addWidget(slider, 3, 0, 1, 2);
+    glay->addWidget(slider, 5, 0, 1, 2);
 
     static constexpr int max = 1000;
     slider->setRange(0, max);
@@ -148,9 +162,9 @@ void MainWindow::InitWalls() const
     {
         static constexpr QVector2D a{-0.1f, -0.6f}, b{0.1f, -0.6f}, c{0.0f, -0.9f};
         static constexpr QVector2D d{-0.1f, -0.9f}, e{0.1f, -0.9f}, f{0.0f, -0.6f};
-        QColor clrs [] = { QColor(180, 0, 0), QColor(180, 35, 0), QColor(170, 125, 0),
-                           QColor(0, 120, 0), QColor(0, 90, 170), QColor(0, 25, 180),
-                           QColor(25, 0, 180), QColor(80, 0, 90) };
+        QColor clrs [] = { QColor(255, 0, 0), QColor(255, 130, 0), QColor(255, 220, 0),
+                           QColor(0, 255, 0), QColor(0, 200, 255), QColor(0, 50, 255),
+                           QColor(120, 0, 255), QColor(220, 0, 200)                     };
 
         static constexpr uint8_t count = 8;
         static const float angleStep = 2 * g_pi_f / count;
@@ -164,9 +178,9 @@ void MainWindow::InitWalls() const
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
-                               QColor(200, 200, 200), clrs[i]                  );
+                               Qt::white, clrs[i]                              );
             wall2.AddTriangle( Mult(d, rot_t), Mult(e, rot_t), Mult(f, rot_t),
-                               QColor(200, 200, 200), clrs[i]                  );
+                               Qt::white, clrs[i]                              );
         }
     }
     {
@@ -174,6 +188,8 @@ void MainWindow::InitWalls() const
         QColor clrs [] = { QColor(10, 100, 35), QColor(10, 30, 100), QColor(110, 30, 0),
                            QColor(10, 35, 100), QColor(100, 5, 40), QColor(0, 70, 70),
                            QColor(30, 100, 15), QColor(100, 0, 0) };
+
+
 
         static constexpr uint8_t count = 8;
         static const float angleStep = 2 * g_pi_f / count;
@@ -186,13 +202,14 @@ void MainWindow::InitWalls() const
         for (auto i = 0; i < count; (++i), (rot_t = rot * rot_t))
         {
             wall1.AddTriangle( Mult(a, rot_t), Mult(b, rot_t), Mult(c, rot_t),
-                               QColor(200, 200, 0), clrs[i]                    );
+                               Qt::yellow, clrs[i]                             );
         }
     }
     {
         static constexpr QVector2D a{-1.0f, 0.0f}, b{0.0f, 0.0f}, c{0.0f, 1.0f};
-        QColor clrs [] = { QColor(110, 110, 110), QColor(0, 110, 110),
-                           QColor(25, 25, 25), QColor(2, 2, 15)  };
+        QColor clrs [] = { QColor(255, 255, 255), QColor(0, 255, 255),
+                           QColor(127, 127, 127), QColor(35, 35, 100)  };
+
 
         static constexpr uint8_t count = 4;
         static const float angleStep = 2 * g_pi_f / count;

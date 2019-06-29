@@ -23,9 +23,19 @@ struct GLWidget::Impl
                   ? std::unique_ptr<RenderStrategy>(
                         std::make_unique<WBOITRenderStrategy>(*this)
                                                    )
-                  : std::unique_ptr<RenderStrategy>(
-                        std::make_unique< CODBRenderStrategy>(*this)
-                                                   )
+                  : s == RenderStrategyEnum::CODB
+                    ? std::unique_ptr<RenderStrategy>(
+                          std::make_unique<CODBRenderStrategy>(*this)
+                                                     )
+                    : s == RenderStrategyEnum::Additive
+                      ? std::unique_ptr<RenderStrategy>(
+                            std::make_unique<AdditiveRenderStrategy>(*this)
+                                                       )
+                      : ( assert(s == RenderStrategyEnum::AdditiveEP),
+                          std::unique_ptr<RenderStrategy>(
+                              std::make_unique<AdditiveEPRenderStrategy>(*this)
+                                                         )
+                        )
              ){}
 
     std::unordered_set<GLuint> vaos;
@@ -82,6 +92,35 @@ struct GLWidget::Impl
 
         void PrepareToTransparentRendering() const;
         void CleanupAfterTransparentRendering() const;
+    };
+
+    struct AdditiveRenderStrategy : RenderStrategy
+    {
+        explicit AdditiveRenderStrategy(Impl & impl_) : RenderStrategy(impl_) {}
+
+        void GenGLResources() override {}
+        void DeleteGLResources() override {}
+        void ReallocateFramebufferStorages(int, int) override {}
+        void Render(GLuint defaultFBO) const override;
+
+        void PrepareToTransparentRendering() const;
+        void CleanupAfterTransparentRendering() const;
+    };
+
+    struct AdditiveEPRenderStrategy : RenderStrategy // exposition in posprocessing
+    {
+        explicit AdditiveEPRenderStrategy(Impl & impl_) : RenderStrategy(impl_) {}
+
+        GLuint framebuffer = 0, colorTexture = 0, depthRenderbuffer = 0;
+
+        void GenGLResources() override;
+        void DeleteGLResources() override;
+        void ReallocateFramebufferStorages(int w, int h) override;
+        void Render(GLuint defaultFBO) const override;
+
+        void PrepareToTransparentRendering() const;
+        void CleanupAfterTransparentRendering() const;
+        void ApplyTextures() const;
     };
 };
 
@@ -160,7 +199,7 @@ void GLWidget::Impl::RenderNonTransparent() const
 {
     auto f = GLFunctions();
 
-    static constexpr GLfloat clearColor[3] = {0.0f, 0.0f, 0.0f};
+    static constexpr GLfloat clearColor[3] = { 0.0f, 0.0f, 0.0f };
     static constexpr GLfloat clearDepth = 1.0f;
 
     f->glClearBufferfv(GL_COLOR, 0,  clearColor);
@@ -271,10 +310,8 @@ void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
 void GLWidget::Impl::WBOITRenderStrategy::PrepareToTransparentRendering() const
 {
     auto f = GLFunctions();
-    f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE);
-    f->glDepthFunc(GL_LEQUAL);
-    f->glDisable(GL_CULL_FACE);
-    f->glEnable(GL_MULTISAMPLE);
+    f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE); f->glDepthFunc(GL_LEQUAL);
+    f->glDisable(GL_CULL_FACE); f->glEnable(GL_MULTISAMPLE);
 
     f->glEnable(GL_BLEND);
 
@@ -286,11 +323,7 @@ void GLWidget::Impl::WBOITRenderStrategy::PrepareToTransparentRendering() const
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::CleanupAfterTransparentRendering() const
-{
-    auto f = GLFunctions();
-    f->glDepthMask(GL_TRUE);
-    f->glDisable(GL_BLEND);
-}
+{ auto f = GLFunctions(); f->glDepthMask(GL_TRUE); f->glDisable(GL_BLEND); }
 
 
 
@@ -372,6 +405,7 @@ void GLWidget::Impl::CODBRenderStrategy::Render(GLuint defaultFBO) const
     f->glBindFramebuffer(GL_FRAMEBUFFER, 0); /* Anti-aliasing doesn't work
         if you don't switch framebuffers here, hell if I know why.         */
     f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+
     impl.RenderNonTransparent();
 
     f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
@@ -391,18 +425,190 @@ void GLWidget::Impl::CODBRenderStrategy::PrepareToTransparentRendering() const
 {
     auto f = GLFunctions();
     f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE); f->glDepthFunc(GL_LEQUAL);
-    f->glDisable(GL_CULL_FACE);
+    f->glDisable(GL_CULL_FACE); f->glEnable(GL_MULTISAMPLE);
 
     f->glEnable(GL_BLEND);
 
     f->glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     f->glBlendEquation(GL_FUNC_ADD);
-
-    f->glEnable(GL_MULTISAMPLE);
 }
 
 void GLWidget::Impl::CODBRenderStrategy::CleanupAfterTransparentRendering() const
 { auto f = GLFunctions(); f->glDepthMask(GL_TRUE); f->glDisable(GL_BLEND); }
+
+
+
+void GLWidget::Impl::AdditiveRenderStrategy::Render(GLuint defaultFBO) const
+{
+    auto f = GLFunctions();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, 0); /* Anti-aliasing doesn't work
+        if you don't switch framebuffers here, hell if I know why.         */
+    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+
+    impl.RenderNonTransparent();
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+    PrepareToTransparentRendering();
+    {
+        auto & iter = GlassWallIterator::Instance();
+        for (iter.Reset(); !iter.AtEnd(); ++iter)
+            iter->DrawTransparentForAdditive(f, impl.projMat);
+    }
+    CleanupAfterTransparentRendering();
+}
+
+
+
+void GLWidget::Impl::AdditiveRenderStrategy::PrepareToTransparentRendering() const
+{
+    auto f = GLFunctions();
+    f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE); f->glDepthFunc(GL_LEQUAL);
+    f->glDisable(GL_CULL_FACE); f->glEnable(GL_MULTISAMPLE);
+
+    f->glEnable(GL_BLEND);
+
+    f->glBlendFunc(GL_ONE, GL_ONE);
+    f->glBlendEquation(GL_FUNC_ADD);
+}
+
+void GLWidget::Impl::AdditiveRenderStrategy::CleanupAfterTransparentRendering() const
+{ auto f = GLFunctions(); f->glDepthMask(GL_TRUE); f->glDisable(GL_BLEND); }
+
+
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::GenGLResources()
+{
+    auto f = GLFunctions();
+
+    f->glGenFramebuffers(1, &framebuffer );
+    f->glGenTextures    (1, &colorTexture);
+    f->glGenRenderbuffers(1, &depthRenderbuffer);
+
+    ReallocateFramebufferStorages(1, 1);
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    f->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D_MULTISAMPLE, colorTexture, 0 );
+    f->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER, depthRenderbuffer   );
+}
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::DeleteGLResources()
+{
+    auto f = GLFunctions();
+
+    f->glDeleteFramebuffers (1, &framebuffer);
+    f->glDeleteTextures     (1, &colorTexture);
+    f->glDeleteRenderbuffers(1, &depthRenderbuffer);
+}
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::ReallocateFramebufferStorages(int w, int h)
+{
+    auto f = GLFunctions();
+
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
+    f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
+                                GL_RGB16F, w, h, GL_TRUE                 );
+    f->glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
+    f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
+                                         GL_DEPTH_COMPONENT, w, h        );
+}
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::Render(GLuint defaultFBO) const
+{
+    auto f = GLFunctions();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    impl.RenderNonTransparent();
+
+    f->glMemoryBarrier(GL_FRAMEBUFFER_BARRIER_BIT);
+
+    PrepareToTransparentRendering();
+    {
+        auto & iter = GlassWallIterator::Instance();
+        for (iter.Reset(); !iter.AtEnd(); ++iter)
+            iter->DrawTransparentForAdditive(f, impl.projMat);
+    }
+    CleanupAfterTransparentRendering();
+
+    f->glBindFramebuffer(GL_FRAMEBUFFER, defaultFBO);
+    f->glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+
+    ApplyTextures();
+}
+
+
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::PrepareToTransparentRendering() const
+{
+    auto f = GLFunctions();
+    f->glEnable(GL_DEPTH_TEST); f->glDepthMask(GL_FALSE); f->glDepthFunc(GL_LEQUAL);
+    f->glDisable(GL_CULL_FACE); f->glEnable(GL_MULTISAMPLE);
+
+    f->glEnable(GL_BLEND);
+
+    f->glBlendFunc(GL_ONE, GL_ONE);
+    f->glBlendEquation(GL_FUNC_ADD);
+}
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::CleanupAfterTransparentRendering() const
+{
+    auto f = GLFunctions();
+    f->glDepthMask(GL_TRUE);
+    f->glDisable(GL_BLEND);
+}
+
+
+
+struct ApplyTTexturesGLResources_AdditiveEP {
+    QOpenGLShaderProgram program;
+
+    explicit ApplyTTexturesGLResources_AdditiveEP()
+    {
+        if (!program.addShaderFromSourceCode(
+                    QOpenGLShader::Vertex,
+                    "#version 450 core                                            \n"
+                    "const vec2 p[4] = vec2[4](                                   \n"
+                    "     vec2(-1, -1), vec2( 1, -1), vec2( 1,  1), vec2(-1,  1)  \n"
+                    "                         );                                  \n"
+                    "void main() { gl_Position = vec4(p[gl_VertexID], 0, 1); }    \n"
+                                            )
+           ) assert(false);
+        if (!program.addShaderFromSourceCode(
+                    QOpenGLShader::Fragment,
+                    "#version 450 core                                                     \n"
+                    "out vec4 outColor;                                                    \n"
+                    "                                                                      \n"
+                    "layout (location = 0) uniform  sampler2DMS colorTexture;              \n"
+                    "                                                                      \n"
+                    "void main() {                                                         \n"
+                    "    ivec2 upos = ivec2(gl_FragCoord.xy);                              \n"
+                    "    vec3 color = texelFetch(colorTexture, upos, gl_SampleID).rgb;     \n"
+                    "                                                                      \n"
+                    "    outColor = vec4(vec3(1) - exp(- 0.8 * color), 1.0);               \n"
+                    "}                                                                     \n"
+                                            )
+           ) assert(false);
+        if (!program.link()) assert(false);
+    }
+};
+
+void GLWidget::Impl::AdditiveEPRenderStrategy::ApplyTextures() const
+{
+    auto f = GLFunctions();
+    static ApplyTTexturesGLResources_AdditiveEP res;
+
+    if (!res.program.bind()) assert(false);
+
+    f->glActiveTexture(GL_TEXTURE0);
+    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
+    f->glUniform1i(0, 0);
+
+    f->glEnable(GL_MULTISAMPLE); f->glDisable(GL_DEPTH_TEST);
+    f->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
 
 
 

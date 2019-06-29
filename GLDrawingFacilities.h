@@ -31,4 +31,14 @@ private:
     std::unique_ptr<Impl> impl;
 };
 
+#pragma pack(push, 1)
+struct RGB16
+{
+    uint16_t r = 0, g = 0, b = 0;
+    explicit constexpr RGB16(uint16_t r_, uint16_t g_, uint16_t b_) : r(r_), g(g_), b(b_) {}
+};
+#pragma pack(pop)
+
+extern RGB16 SRGB_to_Linear(QColor c);
+
 #endif // GLDRAWINGFACILITIES_H
