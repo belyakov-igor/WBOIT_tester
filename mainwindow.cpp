@@ -8,6 +8,7 @@
 #include <QSlider>
 #include <QLabel>
 #include <QCheckBox>
+#include <QSplitter>
 
 #include "GLWidget.h"
 #include "GlassWall.h"
@@ -92,58 +93,35 @@ MainWindow::MainWindow(QWidget * parent) :
 {
     impl->ui->setupUi(this);
 
-    auto glay = new QGridLayout(centralWidget());
-    centralWidget()->setLayout(glay);
-
-    auto sbparent = new QWidget(this);
-    glay->addWidget(sbparent, 0, 0, 1, 2);
     {
-        auto hlay = new QHBoxLayout(sbparent);
-        sbparent->setLayout(hlay);
-        auto lbl = new QLabel(sbparent);
+        auto hlay = new QHBoxLayout(impl->ui->sbparent);
+        impl->ui->sbparent->setLayout(hlay);
+        auto lbl = new QLabel(impl->ui->sbparent);
         hlay->addWidget(lbl);
         lbl->setPixmap(QPixmap(":/Res/Eye.png"));
-        impl->settingsBoard = new QWidget(sbparent);
+        impl->settingsBoard = new QWidget(impl->ui->sbparent);
         hlay->addWidget(impl->settingsBoard);
         impl->settingsBoardLayout = new QHBoxLayout(impl->settingsBoard);
         impl->settingsBoard->setLayout(impl->settingsBoardLayout);
     }
 
-    auto lbl = new QLabel(QStringLiteral(
-                              "Weighted blended order-independent transparency"
-                                        ), this);
-    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
-    glay->addWidget(lbl, 1, 0);
     impl->wgt_WBOIT = new GLWidget(GLWidget::RenderStrategyEnum::WBOIT, this);
-    glay->addWidget(impl->wgt_WBOIT, 2, 0);
-
-    lbl = new QLabel(QStringLiteral("Classic order-dependent blending"), this);
-    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
-    glay->addWidget(lbl, 1, 1);
+    impl->ui->gridLayout_top->addWidget(impl->wgt_WBOIT, 1, 0);
     impl->wgt_CODB  = new GLWidget(GLWidget::RenderStrategyEnum::CODB , this);
-    glay->addWidget(impl->wgt_CODB, 2, 1);
+    impl->ui->gridLayout_top->addWidget(impl->wgt_CODB, 1, 1);
+    impl->ui->gridLayout_top->setRowStretch(1, 1);
 
-    lbl = new QLabel(QStringLiteral("Additive blending"), this);
-    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
-    glay->addWidget(lbl, 3, 0);
     impl->wgt_Additive = new GLWidget(GLWidget::RenderStrategyEnum::Additive, this);
-    glay->addWidget(impl->wgt_Additive, 4, 0);
-
-    lbl = new QLabel(QStringLiteral("Additive blending with exposition"), this);
-    lbl->setMinimumWidth(300); lbl->setAlignment(Qt::AlignHCenter);
-    glay->addWidget(lbl, 3, 1);
+    impl->ui->gridLayout_bottom->addWidget(impl->wgt_Additive, 1, 0);
     impl->wgt_AdditiveEP = new GLWidget(GLWidget::RenderStrategyEnum::AdditiveEP, this);
-    glay->addWidget(impl->wgt_AdditiveEP, 4, 1);
-
-    glay->setRowStretch(2, 1); glay->setRowStretch(4, 1);
-    auto slider = new QSlider(Qt::Horizontal, this);
-    glay->addWidget(slider, 5, 0, 1, 2);
+    impl->ui->gridLayout_bottom->addWidget(impl->wgt_AdditiveEP, 1, 1);
+    impl->ui->gridLayout_bottom->setRowStretch(1, 1);
 
     static constexpr int max = 1000;
-    slider->setRange(0, max);
-    slider->setValue(0);
+    impl->ui->slider->setRange(0, max);
+    impl->ui->slider->setValue(0);
 
-    connect( slider, &QSlider::valueChanged, this,
+    connect( impl->ui->slider, &QSlider::valueChanged, this,
              [this, max = max](int val)
              { this->UpdateWalls(static_cast<float>(val) / max); }
            );

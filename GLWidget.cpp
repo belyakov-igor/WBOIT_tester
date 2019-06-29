@@ -34,8 +34,7 @@ struct GLWidget::Impl
                       : ( assert(s == RenderStrategyEnum::AdditiveEP),
                           std::unique_ptr<RenderStrategy>(
                               std::make_unique<AdditiveEPRenderStrategy>(*this)
-                                                         )
-                        )
+                                                         )                      )
              ){}
 
     std::unordered_set<GLuint> vaos;
@@ -262,7 +261,7 @@ void GLWidget::Impl::WBOITRenderStrategy::ReallocateFramebufferStorages(int w, i
 
     f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
-                                GL_R11F_G11F_B10F, w, h, GL_TRUE         );
+                                GL_RGB10_A2, w, h, GL_TRUE               );
     f->glBindRenderbuffer(GL_RENDERBUFFER, depthRenderbuffer);
     f->glRenderbufferStorageMultisample( GL_RENDERBUFFER, numOfSamples,
                                          GL_DEPTH_COMPONENT, w, h        );
@@ -272,7 +271,7 @@ void GLWidget::Impl::WBOITRenderStrategy::ReallocateFramebufferStorages(int w, i
                                 GL_RGBA16F, w, h, GL_TRUE                );
     f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, alphaTexture);
     f->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, numOfSamples,
-                                GL_R16F, w, h, GL_TRUE                   );
+                                GL_R16, w, h, GL_TRUE                    );
 }
 
 void GLWidget::Impl::WBOITRenderStrategy::Render(GLuint defaultFBO) const
@@ -380,15 +379,9 @@ void GLWidget::Impl::WBOITRenderStrategy::ApplyTextures() const
 
     if (!res.program.bind()) assert(false);
 
-    f->glActiveTexture(GL_TEXTURE0);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTextureNT);
-    f->glUniform1i(0, 0);
-    f->glActiveTexture(GL_TEXTURE1);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
-    f->glUniform1i(1, 1);
-    f->glActiveTexture(GL_TEXTURE2);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, alphaTexture);
-    f->glUniform1i(2, 2);
+    f->glBindTextureUnit(0, colorTextureNT); f->glUniform1i(0, 0);
+    f->glBindTextureUnit(1, colorTexture  ); f->glUniform1i(1, 1);
+    f->glBindTextureUnit(2, alphaTexture  ); f->glUniform1i(2, 2);
 
     f->glEnable(GL_MULTISAMPLE); f->glDisable(GL_DEPTH_TEST);
     f->glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
@@ -602,8 +595,7 @@ void GLWidget::Impl::AdditiveEPRenderStrategy::ApplyTextures() const
 
     if (!res.program.bind()) assert(false);
 
-    f->glActiveTexture(GL_TEXTURE0);
-    f->glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, colorTexture);
+    f->glBindTextureUnit(0, colorTexture);
     f->glUniform1i(0, 0);
 
     f->glEnable(GL_MULTISAMPLE); f->glDisable(GL_DEPTH_TEST);
